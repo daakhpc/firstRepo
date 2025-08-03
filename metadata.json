@@ -1,0 +1,6 @@
+{
+  "name": "Attendance Management System",
+  "description": "A comprehensive system for managing student attendance. Features a Super Admin role for user management (add, edit, delete admins) and an Admin role for class/student management, attendance tracking, and reporting.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
