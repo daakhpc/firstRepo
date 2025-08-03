@@ -1594,12 +1594,14 @@ const FeeManager: React.FC<{
 };
 
 const DayBookManager: React.FC<{
+    students: Student[];
+    classes: ClassInfo[];
     feePayments: FeePayment[];
     openingBalances: OpeningBalance[];
     expenditures: Expenditure[];
     onSaveOpeningBalances: (balances: OpeningBalance[]) => Promise<void>;
     onSaveExpenditures: (expenditures: Expenditure[]) => Promise<void>;
-}> = ({ feePayments, openingBalances, expenditures, onSaveOpeningBalances, onSaveExpenditures }) => {
+}> = ({ students, classes, feePayments, openingBalances, expenditures, onSaveOpeningBalances, onSaveExpenditures }) => {
     
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [isSaving, setIsSaving] = useState(false);
@@ -1696,9 +1698,16 @@ const DayBookManager: React.FC<{
                                 <table className="w-full text-sm text-left">
                                     <tbody>
                                         {dailyIncome.map(p => {
+                                            const student = students.find(s => s.id === p.studentId);
+                                            const studentClass = student ? classes.find(c => c.id === student.classId) : null;
+                                            
+                                            const paymentDescription = student 
+                                                ? `${student.name} / ${student.fatherName} / ${student.studentId}${studentClass ? ` / ${studentClass.name}` : ''}`
+                                                : "Fee Payment from Student";
+
                                             return (
                                             <tr key={p.id} className="border-b dark:border-gray-700">
-                                                <td className="p-2">Fee Payment from Student</td>
+                                                <td className="p-2">{paymentDescription}</td>
                                                 <td className="p-2 text-right font-medium">{formatCurrency(p.amountPaid)}</td>
                                             </tr>
                                             )
@@ -1997,7 +2006,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
                 return <BackupRestoreManager allData={allData} onRestore={handleRestoreData} />;
             }
             case 'fees': return <FeeManager classes={classes} students={students} feeHeads={feeHeads} classFees={classFees} feePayments={feePayments} feeConcessions={feeConcessions} onSaveFeeHeads={handleSaveFeeHeads} onSaveClassFees={handleSaveClassFees} onSaveFeePayments={handleSaveFeePayments} onSaveFeeConcessions={handleSaveFeeConcessions} />;
-            case 'daybook': return <DayBookManager feePayments={feePayments} openingBalances={openingBalances} expenditures={expenditures} onSaveOpeningBalances={handleSaveOpeningBalances} onSaveExpenditures={handleSaveExpenditures} />;
+            case 'daybook': return <DayBookManager students={students} classes={classes} feePayments={feePayments} openingBalances={openingBalances} expenditures={expenditures} onSaveOpeningBalances={handleSaveOpeningBalances} onSaveExpenditures={handleSaveExpenditures} />;
             case 'users': return <p>Access denied.</p>; // Should not be reachable for admins
             default: return <DashboardHome stats={stats} />;
         }
