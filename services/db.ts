@@ -1,4 +1,4 @@
-import { CollegeInfo, ClassInfo, Student, Holiday, AttendanceData, User, WorkableSunday, FeeHead, ClassFee, FeePayment, FeeConcession, Account, JournalEntry } from '../types';
+import { CollegeInfo, ClassInfo, Student, Holiday, AttendanceData, User, WorkableSunday, FeeHead, ClassFee, FeePayment, FeeConcession, OpeningBalance, Expenditure } from '../types';
 
 const DB_PREFIX = 'attendanceApp_';
 
@@ -138,19 +138,18 @@ export const db = {
   saveFeeConcessions: (concessions: FeeConcession[]): Promise<void> =>
     simulateDB(() => saveScopedData('feeConcessions', concessions)),
 
-  // --- Accounting ---
-  getAccounts: (): Promise<Account[]> =>
-    simulateDB(() => getScopedData('accounts', [])),
+  // --- Day Book ---
+  getOpeningBalances: (): Promise<OpeningBalance[]> =>
+    simulateDB(() => getScopedData('openingBalances', [])),
 
-  saveAccounts: (accounts: Account[]): Promise<void> =>
-    simulateDB(() => saveScopedData('accounts', accounts)),
+  saveOpeningBalances: (balances: OpeningBalance[]): Promise<void> =>
+    simulateDB(() => saveScopedData('openingBalances', balances)),
 
-  getJournalEntries: (): Promise<JournalEntry[]> =>
-    simulateDB(() => getScopedData('journalEntries', [])),
+  getExpenditures: (): Promise<Expenditure[]> =>
+    simulateDB(() => getScopedData('expenditures', [])),
 
-  saveJournalEntries: (entries: JournalEntry[]): Promise<void> =>
-    simulateDB(() => saveScopedData('journalEntries', entries)),
-
+  saveExpenditures: (expenditures: Expenditure[]): Promise<void> =>
+    simulateDB(() => saveScopedData('expenditures', expenditures)),
 
   // Users (Global, not scoped)
   getUsers: (): Promise<User[]> => 

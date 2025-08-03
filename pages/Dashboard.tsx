@@ -3,7 +3,7 @@ import {
     CollegeInfo, ClassInfo, Student, Holiday, ViewType, AttendanceData, 
     AttendanceStatus, DailyAttendance, User, UserRole, WorkableSunday,
     FeeHead, ClassFee, FeePayment, FeeConcession, BackupData,
-    Account, JournalEntry, Transaction, VoucherType, ACCOUNT_GROUPS, AccountGroupName
+    OpeningBalance, Expenditure
 } from '../types';
 import { db } from '../services/db';
 import { 
@@ -1065,7 +1065,7 @@ const BackupRestoreManager: React.FC<{
 
                 const requiredKeys: (keyof BackupData)[] = [
                     'collegeInfo', 'classes', 'students', 'holidays', 'workableSundays', 'attendance', 
-                    'feeHeads', 'classFees', 'feePayments', 'feeConcessions', 'accounts', 'journalEntries'
+                    'feeHeads', 'classFees', 'feePayments', 'feeConcessions', 'openingBalances', 'expenditures'
                 ];
                 const hasAllKeys = requiredKeys.every(key => key in data);
 
@@ -1216,17 +1216,11 @@ const FeeManager: React.FC<{
     classFees: ClassFee[];
     feePayments: FeePayment[];
     feeConcessions: FeeConcession[];
-    accounts: Account[];
-    journalEntries: JournalEntry[];
     onSaveFeeHeads: (data: FeeHead[]) => Promise<void>;
     onSaveClassFees: (data: ClassFee[]) => Promise<void>;
     onSaveFeePayments: (data: FeePayment[]) => Promise<void>;
     onSaveFeeConcessions: (data: FeeConcession[]) => Promise<void>;
-    onSaveJournalEntry: (entry: Omit<JournalEntry, 'id' | 'voucherNumber'>) => Promise<void>;
-}> = ({ 
-    classes, students, feeHeads, classFees, feePayments, feeConcessions, accounts, journalEntries,
-    onSaveFeeHeads, onSaveClassFees, onSaveFeePayments, onSaveFeeConcessions, onSaveJournalEntry 
-}) => {
+}> = ({ classes, students, feeHeads, classFees, feePayments, feeConcessions, onSaveFeeHeads, onSaveClassFees, onSaveFeePayments, onSaveFeeConcessions }) => {
     
     type FeeManagerTab = 'heads' | 'assignments' | 'payments';
     const [activeTab, setActiveTab] = useState<FeeManagerTab>('payments');
@@ -1329,19 +1323,8 @@ const FeeManager: React.FC<{
         }
         
         setIsSaving(true);
-
-        // Find accounts for journal entry
-        const cashAccount = accounts.find(a => a.name === 'Cash in Hand');
-        const feeIncomeAccount = accounts.find(a => a.name === 'Tuition Fees');
-        if (!cashAccount || !feeIncomeAccount) {
-            alert('Default accounts (Cash in Hand, Tuition Fees) not found. Please set them up in the Accounting module.');
-            setIsSaving(false);
-            return;
-        }
-
-        const newPaymentId = generateId();
         const newPaymentRecord: FeePayment = {
-            id: newPaymentId,
+            id: generateId(),
             studentId: selectedStudent!.id,
             classFeeId: classFeeId,
             amountPaid: parsedAmount,
@@ -1349,31 +1332,12 @@ const FeeManager: React.FC<{
             remarks: newPayment.remarks,
         };
         await onSaveFeePayments([...feePayments, newPaymentRecord]);
-        
-        const feeHeadName = feeHeads.find(fh => fh.id === classFees.find(cf => cf.id === classFeeId)?.feeHeadId)?.name || 'Fee';
-        const studentName = selectedStudent?.name || 'Student';
-        const studentIdentifier = selectedStudent?.studentId || 'ID';
-        
-        // Create journal entry
-        await onSaveJournalEntry({
-            date: date,
-            voucherType: 'Receipt',
-            narration: `Fee received from ${studentName} (${studentIdentifier}) for ${feeHeadName}. ${newPayment.remarks || ''}`,
-            transactions: [
-                { accountId: cashAccount.id, type: 'debit', amount: parsedAmount },
-                { accountId: feeIncomeAccount.id, type: 'credit', amount: parsedAmount }
-            ],
-            relatedFeePaymentId: newPaymentId
-        });
-
         setIsSaving(false);
         setNewPayment({classFeeId: '', amount: '', date: new Date().toISOString().split('T')[0], remarks: ''});
     };
     
     const handleDeletePayment = (id: string) => {
-        if (window.confirm('Are you sure you want to delete this payment record? This will also delete the associated accounting entry.')) {
-            // Note: This simple delete doesn't re-validate accounting integrity.
-            // For a real-world app, deletion of posted vouchers is usually disallowed.
+        if (window.confirm('Are you sure you want to delete this payment record?')) {
             onSaveFeePayments(feePayments.filter(p => p.id !== id));
         }
     }
@@ -1613,7 +1577,7 @@ const FeeManager: React.FC<{
                                                 <td className="p-2">{headName}</td>
                                                 <td className="p-2">{formatCurrency(p.amountPaid)}</td>
                                                 <td className="p-2">{p.remarks}</td>
-                                                <td className="p-2"><Button size="sm" variant="danger" onClick={() => handleDeletePayment(p.id)} disabled={journalEntries.some(je => je.relatedFeePaymentId === p.id)}><TrashIcon className="w-4 h-4"/></Button></td>
+                                                <td className="p-2"><Button size="sm" variant="danger" onClick={() => handleDeletePayment(p.id)}><TrashIcon className="w-4 h-4"/></Button></td>
                                             </tr>
                                             )
                                         })}
@@ -1629,488 +1593,230 @@ const FeeManager: React.FC<{
     );
 };
 
-const AccountingManager: React.FC<{
-    accounts: Account[];
-    journalEntries: JournalEntry[];
+const DayBookManager: React.FC<{
     students: Student[];
     classes: ClassInfo[];
-    onSaveAccounts: (data: Account[]) => Promise<void>;
-    onSaveJournalEntry: (entry: Omit<JournalEntry, 'id' | 'voucherNumber'>) => Promise<void>;
-}> = ({ accounts, journalEntries, students, classes, onSaveAccounts, onSaveJournalEntry }) => {
+    feePayments: FeePayment[];
+    openingBalances: OpeningBalance[];
+    expenditures: Expenditure[];
+    onSaveOpeningBalances: (balances: OpeningBalance[]) => Promise<void>;
+    onSaveExpenditures: (expenditures: Expenditure[]) => Promise<void>;
+}> = ({ students, classes, feePayments, openingBalances, expenditures, onSaveOpeningBalances, onSaveExpenditures }) => {
     
-    type AccountingTab = 'daybook' | 'accounts' | 'ledger' | 'trial_balance';
-    const [activeTab, setActiveTab] = useState<AccountingTab>('daybook');
-
-    const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
-    const [currentAccount, setCurrentAccount] = useState<Partial<Account> | null>(null);
+    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [isSaving, setIsSaving] = useState(false);
 
-    // Daybook state
-    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-    const dailyJournalEntries = useMemo(() => journalEntries.filter(entry => entry.date === selectedDate).sort((a,b) => b.voucherNumber - a.voucherNumber), [journalEntries, selectedDate]);
-    const accountsById = useMemo(() => accounts.reduce((acc, curr) => { acc[curr.id] = curr; return acc; }, {} as Record<string, Account>), [accounts]);
+    // Modals state
+    const [isOpeningBalanceModalOpen, setIsOpeningBalanceModalOpen] = useState(false);
+    const [openingBalanceForm, setOpeningBalanceForm] = useState<{amount: number; type: 'credit' | 'debit'}>({amount: 0, type: 'credit'});
+
+    const [isExpenditureModalOpen, setIsExpenditureModalOpen] = useState(false);
+    const [currentExpenditure, setCurrentExpenditure] = useState<Partial<Expenditure> | null>(null);
+
+    // Filtered data for the view
+    const dailyIncome = useMemo(() => feePayments.filter(p => p.paymentDate === selectedDate), [feePayments, selectedDate]);
+    const dailyExpenditure = useMemo(() => expenditures.filter(e => e.date === selectedDate), [expenditures, selectedDate]);
+    const openingBalance = useMemo(() => openingBalances.find(ob => ob.id === selectedDate), [openingBalances, selectedDate]);
+
+    // Totals
+    const totalIncome = dailyIncome.reduce((sum, p) => sum + p.amountPaid, 0);
+    const totalExpenditure = dailyExpenditure.reduce((sum, e) => sum + e.amount, 0);
     
-    // Voucher modal state
-    const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
-    const [voucherType, setVoucherType] = useState<VoucherType>('Payment');
+    // Calculate Closing Balance
+    const openingBalanceAmount = openingBalance ? (openingBalance.type === 'credit' ? openingBalance.amount : -openingBalance.amount) : 0;
+    const closingBalance = openingBalanceAmount + totalIncome - totalExpenditure;
 
-    // Ledger report state
-    const [ledgerAccountId, setLedgerAccountId] = useState<string>('');
-    const [ledgerStartDate, setLedgerStartDate] = useState('');
-    const [ledgerEndDate, setLedgerEndDate] = useState('');
+    // Opening Balance handlers
+    const openOpeningBalanceModal = () => {
+        setOpeningBalanceForm({
+            amount: openingBalance?.amount || 0,
+            type: openingBalance?.type || 'credit'
+        });
+        setIsOpeningBalanceModalOpen(true);
+    };
 
-    useEffect(() => {
-        const today = new Date();
-        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-        setLedgerStartDate(firstDay);
-        setLedgerEndDate(today.toISOString().split('T')[0]);
-    }, []);
+    const handleSaveOpeningBalance = async () => {
+        setIsSaving(true);
+        const newBalance: OpeningBalance = {
+            id: selectedDate,
+            amount: openingBalanceForm.amount,
+            type: openingBalanceForm.type
+        };
+        const updatedBalances = openingBalances.filter(ob => ob.id !== selectedDate);
+        await onSaveOpeningBalances([...updatedBalances, newBalance]);
+        setIsSaving(false);
+        setIsOpeningBalanceModalOpen(false);
+    };
 
-    const handleSaveAccount = async () => {
-        if (!currentAccount?.name || !currentAccount.group) {
-            alert('Account name and group are required.');
+    // Expenditure handlers
+    const openExpenditureModal = (exp: Partial<Expenditure> | null = null) => {
+        setCurrentExpenditure(exp || { id: '', date: selectedDate, description: '', amount: 0 });
+        setIsExpenditureModalOpen(true);
+    };
+
+    const handleSaveExpenditure = async () => {
+        if (!currentExpenditure || !currentExpenditure.description || currentExpenditure.amount <= 0) {
+            alert('Please enter a description and a valid amount.');
             return;
         }
         setIsSaving(true);
-        let updatedAccounts;
-        if (currentAccount.id) {
-            updatedAccounts = accounts.map(a => a.id === currentAccount.id ? { ...currentAccount as Account } : a);
+        let updatedExpenditures;
+        if (currentExpenditure.id) {
+            updatedExpenditures = expenditures.map(e => e.id === currentExpenditure.id ? {...currentExpenditure as Expenditure} : e);
         } else {
-            updatedAccounts = [...accounts, { ...currentAccount, id: generateId(), isDefault: false } as Account];
+            updatedExpenditures = [...expenditures, {...currentExpenditure as Omit<Expenditure, 'id'>, id: generateId()}];
         }
-        await onSaveAccounts(updatedAccounts);
+        await onSaveExpenditures(updatedExpenditures);
         setIsSaving(false);
-        setIsAccountModalOpen(false);
+        setIsExpenditureModalOpen(false);
     };
-
-    const openAccountModal = (acc: Partial<Account> | null = null) => {
-        setCurrentAccount(acc || { id: '', name: '', group: 'Expenses', openingBalance: 0, openingBalanceType: 'debit' });
-        setIsAccountModalOpen(true);
-    };
-
-    const openVoucherModal = (type: VoucherType) => {
-        setVoucherType(type);
-        setIsVoucherModalOpen(true);
-    };
-
-    const TabButton: React.FC<{tabId: AccountingTab, children: React.ReactNode}> = ({ tabId, children }) => (
-        <button
-            onClick={() => setActiveTab(tabId)}
-            className={`px-4 py-2 font-semibold border-b-2 transition-colors ${activeTab === tabId ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
-        >
-            {children}
-        </button>
-    );
-
-    const ledgerReportData = useMemo(() => {
-        if (!ledgerAccountId) return null;
-        const selectedAccount = accounts.find(a => a.id === ledgerAccountId);
-        if (!selectedAccount) return null;
-        
-        let balance = selectedAccount.openingBalanceType === 'debit' ? selectedAccount.openingBalance : -selectedAccount.openingBalance;
-        const transactions = [];
-
-        // Opening Balance
-        if (selectedAccount.openingBalance > 0) {
-            transactions.push({
-                date: 'Opening',
-                narration: 'Opening Balance',
-                debit: selectedAccount.openingBalanceType === 'debit' ? selectedAccount.openingBalance : 0,
-                credit: selectedAccount.openingBalanceType === 'credit' ? selectedAccount.openingBalance : 0,
-                balance: balance
-            });
+    
+    const handleDeleteExpenditure = (id: string) => {
+        if (window.confirm('Are you sure you want to delete this expenditure?')) {
+            onSaveExpenditures(expenditures.filter(e => e.id !== id));
         }
-
-        journalEntries
-            .filter(je => je.date >= ledgerStartDate && je.date <= ledgerEndDate)
-            .sort((a,b) => a.date.localeCompare(b.date) || a.voucherNumber - b.voucherNumber)
-            .forEach(je => {
-                je.transactions.forEach(t => {
-                    if (t.accountId === ledgerAccountId) {
-                        const amount = t.type === 'debit' ? t.amount : -t.amount;
-                        balance += amount;
-                        transactions.push({
-                            date: je.date,
-                            narration: je.narration,
-                            debit: t.type === 'debit' ? t.amount : 0,
-                            credit: t.type === 'credit' ? t.amount : 0,
-                            balance: balance
-                        });
-                    }
-                });
-            });
-
-        return { accountName: selectedAccount.name, transactions, finalBalance: balance };
-
-    }, [ledgerAccountId, ledgerStartDate, ledgerEndDate, accounts, journalEntries]);
-
-    const trialBalanceData = useMemo(() => {
-        const balances: Record<string, {name: string, group: AccountGroupName, balance: number}> = {};
-        
-        accounts.forEach(acc => {
-            balances[acc.id] = { 
-                name: acc.name, 
-                group: acc.group,
-                balance: acc.openingBalanceType === 'debit' ? acc.openingBalance : -acc.openingBalance
-            };
-        });
-
-        journalEntries.forEach(je => {
-            je.transactions.forEach(t => {
-                if (balances[t.accountId]) {
-                    const amount = t.type === 'debit' ? t.amount : -t.amount;
-                    balances[t.accountId].balance += amount;
-                }
-            });
-        });
-        
-        const sortedBalances = Object.values(balances).sort((a,b) => a.name.localeCompare(b.name));
-        const totalDebits = sortedBalances.reduce((sum, acc) => sum + (acc.balance > 0 ? acc.balance : 0), 0);
-        const totalCredits = sortedBalances.reduce((sum, acc) => sum + (acc.balance < 0 ? -acc.balance : 0), 0);
-
-        return { balances: sortedBalances, totalDebits, totalCredits };
-
-    }, [accounts, journalEntries]);
+    };
 
     return (
         <Card>
-            <h2 className="text-2xl font-bold mb-4">Accounting</h2>
-            <div className="border-b mb-6 flex space-x-4 custom-scrollbar overflow-x-auto">
-                <TabButton tabId="daybook">Day Book</TabButton>
-                <TabButton tabId="accounts">Chart of Accounts</TabButton>
-                <TabButton tabId="ledger">Ledger Report</TabButton>
-                <TabButton tabId="trial_balance">Trial Balance</TabButton>
+            <div className="flex flex-col md:flex-row justify-between md:items-center mb-6 gap-4">
+                <h2 className="text-2xl font-bold">Day Book</h2>
+                <div className="w-full md:w-auto">
+                    <label className="block text-sm font-medium mb-1">Select Date</label>
+                    <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-full"/>
+                </div>
             </div>
-            
-            {activeTab === 'accounts' && (
-                <div>
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-xl font-semibold">Chart of Accounts</h3>
-                        <Button onClick={() => openAccountModal()}><PlusIcon /> Add Account</Button>
-                    </div>
-                    <div className="space-y-6">
-                        {Object.entries(ACCOUNT_GROUPS).map(([groupId, groupInfo]) => (
-                            <div key={groupId}>
-                                <h4 className="text-lg font-bold text-gray-700 dark:text-gray-300 mb-2">{groupInfo.name}</h4>
-                                <ul className="space-y-2">
-                                {accounts.filter(a => a.group === groupId).map(acc => (
-                                    <li key={acc.id} className="flex justify-between items-center p-3 bg-gray-100 dark:bg-gray-700 rounded-md">
-                                        <div>
-                                            <span className="font-medium">{acc.name}</span>
-                                            <span className="text-sm text-gray-500 ml-2">(Op. Balance: {formatCurrency(acc.openingBalance)} {acc.openingBalanceType})</span>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            {!acc.isDefault && <Button variant="secondary" size="sm" onClick={() => openAccountModal(acc)}><EditIcon/></Button>}
-                                        </div>
-                                    </li>
-                                ))}
-                                </ul>
-                            </div>
-                        ))}
-                    </div>
-                    <Modal isOpen={isAccountModalOpen} onClose={() => setIsAccountModalOpen(false)} title={currentAccount?.id ? 'Edit Account' : 'Add Account'}>
-                        <div className="space-y-4">
-                            <Input placeholder="Account Name" value={currentAccount?.name || ''} onChange={e => setCurrentAccount({...currentAccount, name: e.target.value})} />
-                            <Select value={currentAccount?.group || ''} onChange={e => setCurrentAccount({...currentAccount, group: e.target.value as AccountGroupName})}>
-                                {Object.entries(ACCOUNT_GROUPS).map(([key, val]) => <option key={key} value={key}>{val.name}</option>)}
-                            </Select>
-                            <Input type="number" placeholder="Opening Balance" value={currentAccount?.openingBalance ?? ''} onChange={e => setCurrentAccount({...currentAccount, openingBalance: parseFloat(e.target.value) || 0})} />
-                            <Select value={currentAccount?.openingBalanceType || 'debit'} onChange={e => setCurrentAccount({...currentAccount, openingBalanceType: e.target.value as 'debit' | 'credit'})}>
-                                <option value="debit">Debit</option>
-                                <option value="credit">Credit</option>
-                            </Select>
-                        <Button onClick={handleSaveAccount} isLoading={isSaving} className="mt-4">Save</Button>
-                        </div>
-                    </Modal>
-                </div>
-            )}
 
-            {activeTab === 'daybook' && (
-                <div>
-                     <div className="flex flex-col md:flex-row justify-between md:items-center mb-6 gap-4">
-                        <h3 className="text-xl font-semibold">Day Book</h3>
-                        <div className="flex flex-wrap gap-2">
-                            <Button size="sm" onClick={() => openVoucherModal('Payment')} variant="danger">New Payment</Button>
-                            <Button size="sm" onClick={() => openVoucherModal('Receipt')} variant="primary">New Receipt</Button>
-                            <Button size="sm" onClick={() => openVoucherModal('Journal')} variant="secondary">New Journal</Button>
-                            <Button size="sm" onClick={() => openVoucherModal('Contra')} variant="secondary">New Contra</Button>
-                        </div>
-                        <div className="w-full md:w-auto">
-                            <label className="block text-sm font-medium mb-1">Select Date</label>
-                            <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-full"/>
-                        </div>
-                    </div>
-                    <div className="space-y-4">
-                        {dailyJournalEntries.map(entry => (
-                             <Card key={entry.id} className="p-0">
-                                <div className="p-3 bg-gray-50 dark:bg-gray-800/50 flex justify-between items-center rounded-t-lg">
-                                    <div className="font-bold text-lg">{entry.voucherType} <span className="text-sm font-normal text-gray-500">#{entry.voucherNumber}</span></div>
-                                    <div className="font-semibold">{entry.date}</div>
-                                </div>
-                                <div className="p-3">
-                                    <table className="w-full text-sm">
-                                        <tbody>
-                                            {entry.transactions.map((t, index) => (
-                                                <tr key={index}>
-                                                    <td className="p-1 w-12">{t.type === 'debit' ? 'Dr.' : 'Cr.'}</td>
-                                                    <td className="p-1">{accountsById[t.accountId]?.name || 'Unknown Account'}</td>
-                                                    <td className="p-1 text-right font-mono">{t.type === 'debit' ? formatCurrency(t.amount) : ''}</td>
-                                                    <td className="p-1 text-right font-mono">{t.type === 'credit' ? formatCurrency(t.amount) : ''}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 p-1 italic">
-                                        (Narration: {entry.narration})
-                                    </p>
-                                </div>
-                            </Card>
-                        ))}
-                         {dailyJournalEntries.length === 0 && <p className="text-center text-gray-500 py-8">No transactions for this day.</p>}
-                    </div>
-                </div>
-            )}
-            
-            {activeTab === 'ledger' && (
-                <div>
-                     <h3 className="text-xl font-semibold mb-4">Ledger Report</h3>
-                     <div className="flex flex-col sm:flex-row flex-wrap gap-4 items-end mb-6 p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
-                        <div className="flex-grow w-full sm:w-auto">
-                            <label className="block text-sm font-medium mb-1">Account</label>
-                            <Select value={ledgerAccountId} onChange={e => setLedgerAccountId(e.target.value)}>
-                                <option value="">Select an account</option>
-                                {accounts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                            </Select>
-                        </div>
-                        <div className="flex-grow w-full sm:w-auto">
-                            <label className="block text-sm font-medium mb-1">From Date</label>
-                            <Input type="date" value={ledgerStartDate} onChange={e => setLedgerStartDate(e.target.value)} />
-                        </div>
-                        <div className="flex-grow w-full sm:w-auto">
-                            <label className="block text-sm font-medium mb-1">To Date</label>
-                            <Input type="date" value={ledgerEndDate} onChange={e => setLedgerEndDate(e.target.value)} />
-                        </div>
-                    </div>
-                    {ledgerReportData && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Left Side: Income & Expenditure */}
+                <div className="space-y-6">
+                     {/* Income */}
+                    <div>
+                        <h3 className="text-lg font-semibold mb-2 text-green-600">Income (Credit)</h3>
                         <Card>
-                            <h4 className="text-lg font-bold mb-3">Ledger for: {ledgerReportData.accountName}</h4>
-                             <div className="overflow-x-auto custom-scrollbar">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-gray-200 dark:bg-gray-700"><tr><th className="p-2">Date</th><th className="p-2">Particulars</th><th className="p-2 text-right">Debit</th><th className="p-2 text-right">Credit</th><th className="p-2 text-right">Balance</th></tr></thead>
+                            <div className="overflow-y-auto max-h-64 custom-scrollbar">
+                                <table className="w-full text-sm text-left">
                                     <tbody>
-                                        {ledgerReportData.transactions.map((row, i) => (
-                                            <tr key={i} className="border-b dark:border-gray-700">
-                                                <td className="p-2">{row.date}</td>
-                                                <td className="p-2">{row.narration}</td>
-                                                <td className="p-2 text-right">{row.debit > 0 ? formatCurrency(row.debit) : '-'}</td>
-                                                <td className="p-2 text-right">{row.credit > 0 ? formatCurrency(row.credit) : '-'}</td>
-                                                <td className="p-2 text-right font-semibold">{formatCurrency(Math.abs(row.balance))} {row.balance >= 0 ? 'Dr' : 'Cr'}</td>
+                                        {dailyIncome.map(p => {
+                                            const student = students.find(s => s.id === p.studentId);
+                                            const studentClass = student ? classes.find(c => c.id === student.classId) : null;
+                                            
+                                            const paymentDescription = student 
+                                                ? `${student.name} / ${student.fatherName} / ${student.studentId}${studentClass ? ` / ${studentClass.name}` : ''}`
+                                                : "Fee Payment from Student";
+
+                                            return (
+                                            <tr key={p.id} className="border-b dark:border-gray-700">
+                                                <td className="p-2">{paymentDescription}</td>
+                                                <td className="p-2 text-right font-medium">{formatCurrency(p.amountPaid)}</td>
                                             </tr>
-                                        ))}
+                                            )
+                                        })}
+                                        {dailyIncome.length === 0 && <tr><td colSpan={2} className="p-4 text-center text-gray-500">No income recorded for this day.</td></tr>}
                                     </tbody>
-                                    <tfoot className="font-bold bg-gray-100 dark:bg-gray-800">
-                                        <tr>
-                                            <td colSpan={4} className="p-2 text-right">Closing Balance</td>
-                                            <td className="p-2 text-right">{formatCurrency(Math.abs(ledgerReportData.finalBalance))} {ledgerReportData.finalBalance >= 0 ? 'Dr' : 'Cr'}</td>
-                                        </tr>
-                                    </tfoot>
                                 </table>
                             </div>
                         </Card>
-                    )}
-                </div>
-            )}
-
-            {activeTab === 'trial_balance' && (
-                <div>
-                     <h3 className="text-xl font-semibold mb-4">Trial Balance</h3>
-                     <Card>
-                        <div className="overflow-x-auto custom-scrollbar">
-                            <table className="w-full text-left text-sm">
-                                <thead className="bg-gray-200 dark:bg-gray-700"><tr><th className="p-2">Account</th><th className="p-2">Group</th><th className="p-2 text-right">Debit</th><th className="p-2 text-right">Credit</th></tr></thead>
-                                <tbody>
-                                    {trialBalanceData.balances.map((row) => (
-                                        <tr key={row.name} className="border-b dark:border-gray-700">
-                                            <td className="p-2 font-medium">{row.name}</td>
-                                            <td className="p-2">{row.group}</td>
-                                            <td className="p-2 text-right">{row.balance > 0 ? formatCurrency(row.balance) : '-'}</td>
-                                            <td className="p-2 text-right">{row.balance < 0 ? formatCurrency(-row.balance) : '-'}</td>
+                    </div>
+                     {/* Expenditure */}
+                    <div>
+                        <div className="flex justify-between items-center mb-2">
+                             <h3 className="text-lg font-semibold text-red-600">Expenditure (Debit)</h3>
+                             <Button size="sm" onClick={() => openExpenditureModal()}><PlusIcon className="w-4 h-4" /> Add Expense</Button>
+                        </div>
+                        <Card>
+                             <div className="overflow-y-auto max-h-64 custom-scrollbar">
+                                <table className="w-full text-sm text-left">
+                                    <tbody>
+                                    {dailyExpenditure.map(e => (
+                                        <tr key={e.id} className="border-b dark:border-gray-700">
+                                            <td className="p-2">{e.description}</td>
+                                            <td className="p-2 text-right font-medium">{formatCurrency(e.amount)}</td>
+                                            <td className="p-2 text-right">
+                                                <div className="flex gap-2 justify-end">
+                                                    <Button size="sm" variant="secondary" onClick={() => openExpenditureModal(e)}><EditIcon className="w-4 h-4" /></Button>
+                                                    <Button size="sm" variant="danger" onClick={() => handleDeleteExpenditure(e.id)}><TrashIcon className="w-4 h-4" /></Button>
+                                                </div>
+                                            </td>
                                         </tr>
                                     ))}
-                                </tbody>
-                                <tfoot className="font-bold text-lg bg-gray-100 dark:bg-gray-800">
-                                    <tr>
-                                        <td colSpan={2} className="p-2 text-right">Total</td>
-                                        <td className="p-2 text-right">{formatCurrency(trialBalanceData.totalDebits)}</td>
-                                        <td className="p-2 text-right">{formatCurrency(trialBalanceData.totalCredits)}</td>
-                                    </tr>
-                                </tfoot>
-                            </table>
-                             {Math.abs(trialBalanceData.totalDebits - trialBalanceData.totalCredits) > 0.01 && (
-                                <p className="text-red-500 font-bold text-center mt-4">Totals do not match! Difference: {formatCurrency(Math.abs(trialBalanceData.totalDebits - trialBalanceData.totalCredits))}</p>
-                             )}
-                        </div>
-                     </Card>
+                                    {dailyExpenditure.length === 0 && <tr><td colSpan={3} className="p-4 text-center text-gray-500">No expenditure recorded for this day.</td></tr>}
+                                    </tbody>
+                                </table>
+                             </div>
+                        </Card>
+                    </div>
                 </div>
-            )}
-            
-            <VoucherFormModal 
-                isOpen={isVoucherModalOpen}
-                onClose={() => setIsVoucherModalOpen(false)}
-                voucherType={voucherType}
-                onSave={onSaveJournalEntry}
-                accounts={accounts}
-            />
+
+                {/* Right Side: Summary */}
+                <div className="space-y-6">
+                    <div>
+                        <div className="flex justify-between items-center mb-2">
+                            <h3 className="text-lg font-semibold">Summary</h3>
+                             <Button size="sm" variant="secondary" onClick={openOpeningBalanceModal}>
+                                {openingBalance ? 'Edit Opening Balance' : 'Set Opening Balance'}
+                            </Button>
+                        </div>
+                         <Card>
+                            <dl className="space-y-3">
+                                <div className="flex justify-between items-center">
+                                    <dt className="text-gray-500">Opening Balance</dt>
+                                    <dd className={`font-semibold ${openingBalance?.type === 'debit' ? 'text-red-500' : 'text-gray-800 dark:text-gray-200'}`}>
+                                        {formatCurrency(openingBalance?.amount || 0)} 
+                                        <span className="text-xs ml-1">({openingBalance?.type || 'N/A'})</span>
+                                    </dd>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <dt className="text-gray-500">Total Income</dt>
+                                    <dd className="font-semibold text-green-500">{formatCurrency(totalIncome)}</dd>
+                                </div>
+                                 <div className="flex justify-between items-center">
+                                    <dt className="text-gray-500">Total Expenditure</dt>
+                                    <dd className="font-semibold text-red-500">{formatCurrency(totalExpenditure)}</dd>
+                                </div>
+                                <div className="flex justify-between items-center pt-3 border-t dark:border-gray-700">
+                                    <dt className="font-bold text-lg">Closing Balance</dt>
+                                    <dd className={`font-bold text-lg ${closingBalance < 0 ? 'text-red-500' : 'text-blue-600 dark:text-blue-400'}`}>{formatCurrency(closingBalance)}</dd>
+                                </div>
+                            </dl>
+                        </Card>
+                    </div>
+                </div>
+            </div>
+
+            <Modal isOpen={isOpeningBalanceModalOpen} onClose={() => setIsOpeningBalanceModalOpen(false)} title="Set Opening Balance">
+                <div className="space-y-4">
+                     <div>
+                        <label className="block text-sm font-medium mb-1">Amount</label>
+                        <Input type="number" value={openingBalanceForm.amount} onChange={e => setOpeningBalanceForm({...openingBalanceForm, amount: parseFloat(e.target.value) || 0})} />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Type</label>
+                        <Select value={openingBalanceForm.type} onChange={e => setOpeningBalanceForm({...openingBalanceForm, type: e.target.value as 'credit' | 'debit'})}>
+                            <option value="credit">Credit (Cash in Hand)</option>
+                            <option value="debit">Debit (Amount Owed)</option>
+                        </Select>
+                    </div>
+                    <Button onClick={handleSaveOpeningBalance} isLoading={isSaving}>Save</Button>
+                </div>
+            </Modal>
+             <Modal isOpen={isExpenditureModalOpen} onClose={() => setIsExpenditureModalOpen(false)} title={currentExpenditure?.id ? "Edit Expenditure" : "Add Expenditure"}>
+                <div className="space-y-4">
+                     <div>
+                        <label className="block text-sm font-medium mb-1">Description</label>
+                        <Input value={currentExpenditure?.description || ''} onChange={e => setCurrentExpenditure({...currentExpenditure, description: e.target.value})} />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Amount</label>
+                        <Input type="number" value={currentExpenditure?.amount || ''} onChange={e => setCurrentExpenditure({...currentExpenditure, amount: parseFloat(e.target.value) || 0})} />
+                    </div>
+                    <Button onClick={handleSaveExpenditure} isLoading={isSaving}>Save</Button>
+                </div>
+            </Modal>
         </Card>
     );
 };
 
-// VoucherFormModal component
-const VoucherFormModal: React.FC<{
-    isOpen: boolean;
-    onClose: () => void;
-    voucherType: VoucherType;
-    onSave: (entry: Omit<JournalEntry, 'id' | 'voucherNumber'>) => Promise<void>;
-    accounts: Account[];
-}> = ({ isOpen, onClose, voucherType, onSave, accounts }) => {
-    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-    const [narration, setNarration] = useState('');
-    const [transactions, setTransactions] = useState<Array<{id: string, accountId: string, debit: string, credit: string}>>([
-        { id: generateId(), accountId: '', debit: '', credit: '' },
-        { id: generateId(), accountId: '', debit: '', credit: '' }
-    ]);
-    const [isSaving, setIsSaving] = useState(false);
-
-    useEffect(() => {
-        if (isOpen) {
-            setDate(new Date().toISOString().split('T')[0]);
-            setNarration('');
-            setTransactions([
-                { id: generateId(), accountId: '', debit: '', credit: '' },
-                { id: generateId(), accountId: '', debit: '', credit: '' }
-            ]);
-        }
-    }, [isOpen, voucherType]);
-
-    const handleTransactionChange = (id: string, field: 'accountId' | 'debit' | 'credit', value: string) => {
-        setTransactions(prev => prev.map(t => {
-            if (t.id === id) {
-                if (field === 'debit' && value) return {...t, debit: value, credit: ''};
-                if (field === 'credit' && value) return {...t, credit: value, debit: ''};
-                return {...t, [field]: value};
-            }
-            return t;
-        }));
-    };
-
-    const addTransactionRow = () => {
-        setTransactions(prev => [...prev, { id: generateId(), accountId: '', debit: '', credit: '' }]);
-    };
-    
-    const removeTransactionRow = (id: string) => {
-        setTransactions(prev => prev.filter(t => t.id !== id));
-    };
-
-    const totalDebit = useMemo(() => transactions.reduce((sum, t) => sum + (parseFloat(t.debit) || 0), 0), [transactions]);
-    const totalCredit = useMemo(() => transactions.reduce((sum, t) => sum + (parseFloat(t.credit) || 0), 0), [transactions]);
-
-    const handleSave = async () => {
-        if (Math.abs(totalDebit - totalCredit) > 0.01 || totalDebit === 0) {
-            alert('Total debits must equal total credits, and cannot be zero.');
-            return;
-        }
-
-        const finalTransactions: Transaction[] = transactions
-            .map(t => {
-                const debit = parseFloat(t.debit) || 0;
-                const credit = parseFloat(t.credit) || 0;
-                if (!t.accountId || (debit === 0 && credit === 0)) return null;
-                return {
-                    accountId: t.accountId,
-                    type: debit > 0 ? 'debit' : 'credit',
-                    amount: debit > 0 ? debit : credit
-                }
-            })
-            .filter((t): t is Transaction => t !== null);
-        
-        if (finalTransactions.length < 2) {
-            alert('At least two transaction lines are required.');
-            return;
-        }
-
-        setIsSaving(true);
-        await onSave({
-            date,
-            voucherType,
-            narration,
-            transactions: finalTransactions
-        });
-        setIsSaving(false);
-        onClose();
-    };
-
-
-    return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`New ${voucherType} Voucher`} size="xl">
-            <div className="space-y-4">
-                <div className="flex gap-4">
-                    <div className="flex-1">
-                        <label className="block text-sm mb-1">Date</label>
-                        <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
-                    </div>
-                </div>
-                
-                <div className="overflow-x-auto custom-scrollbar border rounded-lg">
-                    <table className="w-full text-sm">
-                        <thead className="bg-gray-100 dark:bg-gray-700">
-                            <tr>
-                                <th className="p-2 text-left">Account</th>
-                                <th className="p-2 text-right w-32">Debit</th>
-                                <th className="p-2 text-right w-32">Credit</th>
-                                <th className="p-2 w-10"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {transactions.map(t => (
-                                <tr key={t.id}>
-                                    <td className="p-1">
-                                        <Select value={t.accountId} onChange={e => handleTransactionChange(t.id, 'accountId', e.target.value)}>
-                                            <option value="">-- Select Account --</option>
-                                            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                                        </Select>
-                                    </td>
-                                    <td className="p-1"><Input type="number" className="text-right" placeholder="0.00" value={t.debit} onChange={e => handleTransactionChange(t.id, 'debit', e.target.value)} /></td>
-                                    <td className="p-1"><Input type="number" className="text-right" placeholder="0.00" value={t.credit} onChange={e => handleTransactionChange(t.id, 'credit', e.target.value)} /></td>
-                                    <td className="p-1 text-center"><Button size="sm" variant="danger" onClick={() => removeTransactionRow(t.id)}><TrashIcon className="w-4 h-4"/></Button></td>
-                                </tr>
-                            ))}
-                        </tbody>
-                        <tfoot className="font-bold bg-gray-100 dark:bg-gray-700">
-                            <tr>
-                                <td className="p-2 text-right">Total</td>
-                                <td className="p-2 text-right">{formatCurrency(totalDebit)}</td>
-                                <td className="p-2 text-right">{formatCurrency(totalCredit)}</td>
-                                <td className="p-2"></td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-                <Button size="sm" variant="secondary" onClick={addTransactionRow}><PlusIcon className="w-4 h-4"/> Add Row</Button>
-                {Math.abs(totalDebit-totalCredit) > 0.01 && <p className="text-sm text-red-500 text-center">Totals do not match.</p>}
-
-
-                 <div>
-                    <label className="block text-sm mb-1">Narration</label>
-                    <Input placeholder="Transaction details..." value={narration} onChange={e => setNarration(e.target.value)} />
-                </div>
-                 <div className="flex justify-end gap-2 pt-4 border-t dark:border-gray-700">
-                    <Button variant="secondary" onClick={onClose}>Cancel</Button>
-                    <Button onClick={handleSave} isLoading={isSaving}>Save Voucher</Button>
-                </div>
-            </div>
-        </Modal>
-    );
-}
 
 // --- Main Dashboard Component ---
 interface DashboardProps { 
@@ -2138,8 +1844,8 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
     const [classFees, setClassFees] = useState<ClassFee[]>([]);
     const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
     const [feeConcessions, setFeeConcessions] = useState<FeeConcession[]>([]);
-    const [accounts, setAccounts] = useState<Account[]>([]);
-    const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
+    const [openingBalances, setOpeningBalances] = useState<OpeningBalance[]>([]);
+    const [expenditures, setExpenditures] = useState<Expenditure[]>([]);
 
     
     useEffect(() => {
@@ -2154,35 +1860,18 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
                 // Admin users get their own scoped data
                     const [
                         info, classesData, studentsData, holidaysData, workableSundaysData, attendanceData,
-                        feeHeadsData, classFeesData, feePaymentsData, feeConcessionsData, accountsData,
-                        journalEntriesData
+                        feeHeadsData, classFeesData, feePaymentsData, feeConcessionsData, openingBalancesData,
+                        expendituresData
                     ] = await Promise.all([
                         db.getCollegeInfo(), db.getClasses(), db.getStudents(), db.getHolidays(), 
                         db.getWorkableSundays(), db.getAttendance(), db.getFeeHeads(), db.getClassFees(), db.getFeePayments(),
-                        db.getFeeConcessions(), db.getAccounts(), db.getJournalEntries()
+                        db.getFeeConcessions(), db.getOpeningBalances(), db.getExpenditures()
                     ]);
                     setCollegeInfo(info); setClasses(classesData); setStudents(studentsData); 
                     setHolidays(holidaysData); setWorkableSundays(workableSundaysData); setAttendance(attendanceData);
                     setFeeHeads(feeHeadsData); setClassFees(classFeesData); setFeePayments(feePaymentsData);
-                    setFeeConcessions(feeConcessionsData); 
-                    setJournalEntries(journalEntriesData);
-                    
-                    if (accountsData.length === 0) {
-                        const defaultAccounts: Account[] = [
-                            { id: generateId(), name: 'Cash in Hand', group: 'Assets', openingBalance: 0, openingBalanceType: 'debit', isDefault: true },
-                            { id: generateId(), name: 'Bank Account', group: 'Assets', openingBalance: 0, openingBalanceType: 'debit', isDefault: true },
-                            { id: generateId(), name: 'Capital Account', group: 'Equity', openingBalance: 0, openingBalanceType: 'credit', isDefault: true },
-                            { id: generateId(), name: 'Tuition Fees', group: 'Income', openingBalance: 0, openingBalanceType: 'credit', isDefault: true },
-                            { id: generateId(), name: 'Late Fees', group: 'Income', openingBalance: 0, openingBalanceType: 'credit', isDefault: true },
-                            { id: generateId(), name: 'Salaries', group: 'Expenses', openingBalance: 0, openingBalanceType: 'debit', isDefault: true },
-                            { id: generateId(), name: 'Rent', group: 'Expenses', openingBalance: 0, openingBalanceType: 'debit', isDefault: true },
-                            { id: generateId(), name: 'Utilities', group: 'Expenses', openingBalance: 0, openingBalanceType: 'debit', isDefault: true },
-                        ];
-                        setAccounts(defaultAccounts);
-                        await db.saveAccounts(defaultAccounts);
-                    } else {
-                        setAccounts(accountsData);
-                    }
+                    setFeeConcessions(feeConcessionsData); setOpeningBalances(openingBalancesData);
+                    setExpenditures(expendituresData);
                 }
             } catch (error) {
                 console.error("Failed to load data", error); showToast("Failed to load data from storage.", 'error');
@@ -2221,10 +1910,6 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
              // Delete concessions of deleted students
             const updatedFeeConcessions = feeConcessions.filter(fc => !deletedStudentIds.includes(fc.studentId));
             await handleSaveFeeConcessions(updatedFeeConcessions);
-            // Delete related journal entries
-            const paymentIdsToDelete = feePayments.filter(fp => deletedStudentIds.includes(fp.studentId)).map(fp => fp.id);
-            const updatedJournalEntries = journalEntries.filter(je => !je.relatedFeePaymentId || !paymentIdsToDelete.includes(je.relatedFeePaymentId));
-            await handleSaveJournalEntries(updatedJournalEntries);
         }
         await db.saveStudents(updatedStudents); setStudents(updatedStudents); showToast('Students updated!', 'success');
     };
@@ -2254,34 +1939,16 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
         await db.saveClassFees(data); setClassFees(data); showToast('Fee Assignments updated!', 'success');
     };
     const handleSaveFeePayments = async (data: FeePayment[]) => {
-        await db.saveFeePayments(data); setFeePayments(data);
-        if (data.length < feePayments.length) {
-            // This means a deletion occurred
-            const deletedPaymentIds = feePayments.filter(p => !data.some(dp => dp.id === p.id)).map(p => p.id);
-            const updatedJournalEntries = journalEntries.filter(je => !je.relatedFeePaymentId || !deletedPaymentIds.includes(je.relatedFeePaymentId));
-            await handleSaveJournalEntries(updatedJournalEntries);
-        }
-        showToast('Payments updated!', 'success');
+        await db.saveFeePayments(data); setFeePayments(data); showToast('Payments updated!', 'success');
     };
     const handleSaveFeeConcessions = async (data: FeeConcession[]) => {
         await db.saveFeeConcessions(data); setFeeConcessions(data); showToast('Concessions updated!', 'success');
     };
-    const handleSaveAccounts = async (data: Account[]) => {
-        await db.saveAccounts(data); setAccounts(data); showToast('Accounts updated!', 'success');
+    const handleSaveOpeningBalances = async (data: OpeningBalance[]) => {
+        await db.saveOpeningBalances(data); setOpeningBalances(data); showToast('Opening Balance updated!', 'success');
     };
-    const handleSaveJournalEntries = async (data: JournalEntry[]) => {
-        await db.saveJournalEntries(data); setJournalEntries(data); showToast('Journal updated!', 'success');
-    };
-
-    const handleSaveNewJournalEntry = async (entry: Omit<JournalEntry, 'id' | 'voucherNumber'>) => {
-        const lastVoucherNumber = journalEntries.reduce((max, je) => Math.max(max, je.voucherNumber), 0);
-        const newEntry: JournalEntry = {
-            ...entry,
-            id: generateId(),
-            voucherNumber: lastVoucherNumber + 1
-        };
-        const updatedJournalEntries = [...journalEntries, newEntry];
-        await handleSaveJournalEntries(updatedJournalEntries);
+    const handleSaveExpenditures = async (data: Expenditure[]) => {
+        await db.saveExpenditures(data); setExpenditures(data); showToast('Expenditures updated!', 'success');
     };
 
     const handleRestoreData = async (data: BackupData) => {
@@ -2296,8 +1963,8 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
             await db.saveClassFees(data.classFees);
             await db.saveFeePayments(data.feePayments);
             await db.saveFeeConcessions(data.feeConcessions);
-            await db.saveAccounts(data.accounts || []);
-            await db.saveJournalEntries(data.journalEntries || []);
+            await db.saveOpeningBalances(data.openingBalances || []);
+            await db.saveExpenditures(data.expenditures || []);
     
             showToast('Data restored successfully! The page will now reload.', 'success');
             
@@ -2334,12 +2001,12 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
                 const allData: BackupData = {
                     collegeInfo, classes, students, holidays, workableSundays, 
                     attendance, feeHeads, classFees, feePayments, feeConcessions,
-                    accounts, journalEntries
+                    openingBalances, expenditures
                 };
                 return <BackupRestoreManager allData={allData} onRestore={handleRestoreData} />;
             }
-            case 'fees': return <FeeManager classes={classes} students={students} feeHeads={feeHeads} classFees={classFees} feePayments={feePayments} feeConcessions={feeConcessions} accounts={accounts} journalEntries={journalEntries} onSaveFeeHeads={handleSaveFeeHeads} onSaveClassFees={handleSaveClassFees} onSaveFeePayments={handleSaveFeePayments} onSaveFeeConcessions={handleSaveFeeConcessions} onSaveJournalEntry={handleSaveNewJournalEntry} />;
-            case 'accounting': return <AccountingManager accounts={accounts} journalEntries={journalEntries} students={students} classes={classes} onSaveAccounts={handleSaveAccounts} onSaveJournalEntry={handleSaveNewJournalEntry} />;
+            case 'fees': return <FeeManager classes={classes} students={students} feeHeads={feeHeads} classFees={classFees} feePayments={feePayments} feeConcessions={feeConcessions} onSaveFeeHeads={handleSaveFeeHeads} onSaveClassFees={handleSaveClassFees} onSaveFeePayments={handleSaveFeePayments} onSaveFeeConcessions={handleSaveFeeConcessions} />;
+            case 'daybook': return <DayBookManager students={students} classes={classes} feePayments={feePayments} openingBalances={openingBalances} expenditures={expenditures} onSaveOpeningBalances={handleSaveOpeningBalances} onSaveExpenditures={handleSaveExpenditures} />;
             case 'users': return <p>Access denied.</p>; // Should not be reachable for admins
             default: return <DashboardHome stats={stats} />;
         }
@@ -2353,7 +2020,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
         { id: 'holidays', label: 'Holidays', adminOnly: true },
         { id: 'workableSundays', label: 'Workable Sundays', adminOnly: true },
         { id: 'fees', label: 'Fee Management', adminOnly: true },
-        { id: 'accounting', label: 'Accounting', adminOnly: true },
+        { id: 'daybook', label: 'Day Book', adminOnly: true },
         { id: 'backup', label: 'Backup & Restore', adminOnly: true },
     ];
     

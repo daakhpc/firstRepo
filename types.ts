@@ -75,43 +75,18 @@ export interface FeePayment {
     remarks?: string;
 }
 
-
-// --- Accounting Types ---
-export const ACCOUNT_GROUPS = {
-    'Assets': { name: 'Assets', type: 'debit' },
-    'Liabilities': { name: 'Liabilities', type: 'credit' },
-    'Equity': { name: 'Equity', type: 'credit' },
-    'Income': { name: 'Income', type: 'credit' },
-    'Expenses': { name: 'Expenses', type: 'debit' },
-} as const;
-
-export type AccountGroupName = keyof typeof ACCOUNT_GROUPS;
-
-export interface Account {
-    id: string;
-    name: string;
-    group: AccountGroupName;
-    openingBalance: number;
-    openingBalanceType: 'debit' | 'credit';
-    isDefault: boolean; // Cannot be deleted
-}
-
-export type VoucherType = 'Payment' | 'Receipt' | 'Journal' | 'Contra';
-
-export interface Transaction {
-    accountId: string;
-    type: 'debit' | 'credit';
+// --- Day Book Types ---
+export interface OpeningBalance {
+    id: string; // YYYY-MM-DD
     amount: number;
+    type: 'credit' | 'debit';
 }
 
-export interface JournalEntry {
+export interface Expenditure {
     id: string;
     date: string; // YYYY-MM-DD
-    voucherType: VoucherType;
-    voucherNumber: number;
-    narration: string;
-    transactions: Transaction[];
-    relatedFeePaymentId?: string; // Link to fee payment if applicable
+    description: string;
+    amount: number;
 }
 
 
@@ -135,8 +110,8 @@ export interface BackupData {
     classFees: ClassFee[];
     feePayments: FeePayment[];
     feeConcessions: FeeConcession[];
-    accounts: Account[];
-    journalEntries: JournalEntry[];
+    openingBalances: OpeningBalance[];
+    expenditures: Expenditure[];
 }
 
-export type ViewType = 'dashboard' | 'college' | 'classes' | 'students' | 'attendance' | 'holidays' | 'users' | 'workableSundays' | 'fees' | 'backup' | 'accounting';
+export type ViewType = 'dashboard' | 'college' | 'classes' | 'students' | 'attendance' | 'holidays' | 'users' | 'workableSundays' | 'fees' | 'backup' | 'daybook';
