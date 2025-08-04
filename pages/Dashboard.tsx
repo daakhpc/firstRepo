@@ -1799,11 +1799,10 @@ const AccountManager: React.FC<{
                                     {group.accounts.sort((a,b) => a.name.localeCompare(b.name)).map(acc => (
                                         <li key={acc.id} className="flex justify-between items-center p-2 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                             <div>
-                                                <div className="font-medium">{acc.name}</div>
-                                                <div className="text-sm text-gray-500">
-                                                    {acc.fatherName && <span>S/O {acc.fatherName}</span>}
-                                                    {acc.isStudentAccount && <span className="text-xs ml-2 text-blue-500 font-semibold">(Student)</span>}
-                                                </div>
+                                                <span className="font-medium">
+                                                    { acc.fatherName ? `${acc.name} / ${acc.fatherName}` : acc.name }
+                                                </span>
+                                                {acc.isStudentAccount && <span className="text-xs ml-2 text-blue-500 font-semibold">(Student)</span>}
                                             </div>
                                             
                                             <div className="flex gap-2">
@@ -1907,12 +1906,12 @@ const DayBookManager: React.FC<{
     onSaveOpeningBalances, onSaveExpenditures, onSaveIncomeEntries 
 }) => {
     
-    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+    const [fromDate, setFromDate] = useState(new Date().toISOString().split('T')[0]);
+    const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
     const [isSaving, setIsSaving] = useState(false);
 
-    const [effectiveOpeningBalance, setEffectiveOpeningBalance] = useState<{amount: number, type: 'credit'|'debit'}>({ amount: 0, type: 'credit'});
-
     // Modals state
+    const [dateForOBModal, setDateForOBModal] = useState('');
     const [isOpeningBalanceModalOpen, setIsOpeningBalanceModalOpen] = useState(false);
     const [openingBalanceForm, setOpeningBalanceForm] = useState<{amount: number; type: 'credit' | 'debit'}>({amount: 0, type: 'credit'});
 
@@ -1934,10 +1933,6 @@ const DayBookManager: React.FC<{
             return userDefinedBalance;
         }
 
-        const prevDate = new Date(dateStr + 'T00:00:00');
-        prevDate.setDate(prevDate.getDate() - 1);
-        const prevDateStr = prevDate.toISOString().split('T')[0];
-        
         const allDates = [...new Set([
             ...openingBalances.map(ob => ob.id),
             ...feePayments.map(fp => fp.paymentDate),
@@ -1949,11 +1944,6 @@ const DayBookManager: React.FC<{
             return { amount: 0, type: 'credit' };
         }
 
-        // It's expensive to recalculate the whole chain every time.
-        // So we get the PREVIOUS day's balance and calculate from there.
-        // This requires a recursive or iterative approach.
-        // To prevent deep recursion, we'll find the nearest preceding user-defined balance.
-        
         const sortedBalances = [...openingBalances].sort((a,b) => new Date(b.id).getTime() - new Date(a.id).getTime());
         const startingPoint = sortedBalances.find(ob => new Date(ob.id) < new Date(dateStr));
         
@@ -1964,14 +1954,13 @@ const DayBookManager: React.FC<{
             currentDate = new Date(startingPoint.id + 'T00:00:00');
             runningBalance = startingPoint.type === 'credit' ? startingPoint.amount : -startingPoint.amount;
         } else {
-             // If no starting point, start from beginning of all transactions
             currentDate = new Date(allDates[0] + 'T00:00:00');
-            runningBalance = 0;
+            const firstDayUserBalance = openingBalances.find(ob => ob.id === allDates[0]);
+            runningBalance = firstDayUserBalance ? (firstDayUserBalance.type === 'credit' ? firstDayUserBalance.amount : -firstDayUserBalance.amount) : 0;
         }
-
+        
         const targetDate = new Date(dateStr + 'T00:00:00');
         
-        // Iterate from the starting point up to the day before the selected date
         while (currentDate < targetDate) {
             const loopDateStr = currentDate.toISOString().split('T')[0];
             
@@ -1981,10 +1970,8 @@ const DayBookManager: React.FC<{
             
             runningBalance += (incomeForDay - expenditureForDay);
             
-            // Move to next day
             currentDate.setDate(currentDate.getDate() + 1);
             
-            // If the next day has a user-defined balance, we reset our running total to that.
             const nextDayStr = currentDate.toISOString().split('T')[0];
             const nextDayUserBalance = openingBalances.find(ob => ob.id === nextDayStr);
             if (nextDayUserBalance) {
@@ -1999,24 +1986,63 @@ const DayBookManager: React.FC<{
 
     }, [openingBalances, feePayments, incomeEntries, expenditures]);
     
-    useEffect(() => {
-        const ob = calculateOpeningBalanceForDate(selectedDate);
-        setEffectiveOpeningBalance(ob);
-    }, [selectedDate, calculateOpeningBalanceForDate]);
+    const dateRange = useMemo(() => {
+        const dates: string[] = [];
+        if (!fromDate || !toDate) return dates;
+        
+        let currentDate = new Date(fromDate + 'T00:00:00');
+        const endDate = new Date(toDate + 'T00:00:00');
+        
+        if (currentDate > endDate) return dates;
 
+        while (currentDate <= endDate) {
+            dates.push(currentDate.toISOString().split('T')[0]);
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+        return dates;
+    }, [fromDate, toDate]);
 
-    // Filtered data for the view
-    const dailyFeePayments = useMemo(() => feePayments.filter(p => p.paymentDate === selectedDate), [feePayments, selectedDate]);
-    const dailyOtherIncome = useMemo(() => incomeEntries.filter(p => p.date === selectedDate), [incomeEntries, selectedDate]);
-    const dailyExpenditure = useMemo(() => expenditures.filter(e => e.date === selectedDate), [expenditures, selectedDate]);
+    const dailyBreakdown = useMemo(() => {
+        if (dateRange.length === 0) return [];
 
-    // Totals
-    const totalIncome = dailyFeePayments.reduce((sum, p) => sum + p.amountPaid, 0) + dailyOtherIncome.reduce((sum, p) => sum + p.amount, 0);
-    const totalExpenditure = dailyExpenditure.reduce((sum, e) => sum + e.amount, 0);
-    
-    // Calculate Closing Balance
-    const openingBalanceAmount = effectiveOpeningBalance ? (effectiveOpeningBalance.type === 'credit' ? effectiveOpeningBalance.amount : -effectiveOpeningBalance.amount) : 0;
-    const closingBalance = openingBalanceAmount + totalIncome - totalExpenditure;
+        let breakdown = [];
+        let previousClosingBalance = calculateOpeningBalanceForDate(dateRange[0]);
+
+        for (const dateStr of dateRange) {
+            const userDefinedOB = openingBalances.find(ob => ob.id === dateStr);
+            const openingBalance = userDefinedOB || previousClosingBalance;
+            
+            const dailyFeePayments = feePayments.filter(p => p.paymentDate === dateStr);
+            const dailyOtherIncome = incomeEntries.filter(i => i.date === dateStr);
+            const dailyExpenditure = expenditures.filter(e => e.date === dateStr);
+
+            const totalIncome = dailyFeePayments.reduce((sum, p) => sum + p.amountPaid, 0) + dailyOtherIncome.reduce((sum, i) => sum + i.amount, 0);
+            const totalExpenditure = dailyExpenditure.reduce((sum, e) => sum + e.amount, 0);
+
+            const openingAmount = openingBalance.type === 'credit' ? openingBalance.amount : -openingBalance.amount;
+            const closingBalanceAmount = openingAmount + totalIncome - totalExpenditure;
+
+            const closingBalance = {
+                amount: Math.abs(closingBalanceAmount),
+                type: closingBalanceAmount >= 0 ? 'credit' : 'debit'
+            };
+
+            breakdown.push({
+                date: dateStr,
+                openingBalance,
+                dailyFeePayments,
+                dailyOtherIncome,
+                dailyExpenditure,
+                totalIncome,
+                totalExpenditure,
+                closingBalance,
+            });
+
+            previousClosingBalance = closingBalance;
+        }
+
+        return breakdown;
+    }, [dateRange, calculateOpeningBalanceForDate, openingBalances, feePayments, incomeEntries, expenditures]);
 
     // --- Description Helpers ---
     const getTransactionDescription = (type: 'fee' | 'income' | 'expenditure', item: any): { title: string, subtitle: string } => {
@@ -2044,21 +2070,22 @@ const DayBookManager: React.FC<{
     };
 
     // Opening Balance handlers
-    const openOpeningBalanceModal = () => {
-        const userDefinedOB = openingBalances.find(ob => ob.id === selectedDate);
+    const openOpeningBalanceModal = (date: string) => {
+        const userDefinedOB = openingBalances.find(ob => ob.id === date);
         setOpeningBalanceForm({
             amount: userDefinedOB?.amount || 0,
             type: userDefinedOB?.type || 'credit'
         });
+        setDateForOBModal(date);
         setIsOpeningBalanceModalOpen(true);
     };
 
     const handleSaveOpeningBalance = async () => {
         setIsSaving(true);
-        const updatedBalances = openingBalances.filter(ob => ob.id !== selectedDate);
+        const updatedBalances = openingBalances.filter(ob => ob.id !== dateForOBModal);
         if(openingBalanceForm.amount > 0) {
             const newBalance: OpeningBalance = {
-                id: selectedDate,
+                id: dateForOBModal,
                 amount: openingBalanceForm.amount,
                 type: openingBalanceForm.type
             };
@@ -2070,8 +2097,8 @@ const DayBookManager: React.FC<{
     };
 
     // Income handlers
-    const openIncomeModal = (entry: Partial<IncomeEntry> | null = null) => {
-        setCurrentIncome(entry || { id: '', date: selectedDate, remarks: '', amount: 0, accountId: '' });
+    const openIncomeModal = (date: string, entry: Partial<IncomeEntry> | null = null) => {
+        setCurrentIncome(entry || { id: '', date, remarks: '', amount: 0, accountId: '' });
         setIsIncomeModalOpen(true);
     };
 
@@ -2100,8 +2127,8 @@ const DayBookManager: React.FC<{
 
 
     // Expenditure handlers
-    const openExpenditureModal = (exp: Partial<Expenditure> | null = null) => {
-        setCurrentExpenditure(exp || { id: '', date: selectedDate, remarks: '', amount: 0, accountId: '' });
+    const openExpenditureModal = (date: string, exp: Partial<Expenditure> | null = null) => {
+        setCurrentExpenditure(exp || { id: '', date, remarks: '', amount: 0, accountId: '' });
         setIsExpenditureModalOpen(true);
     };
 
@@ -2134,121 +2161,92 @@ const DayBookManager: React.FC<{
         <Card>
             <div className="flex flex-col md:flex-row justify-between md:items-center mb-6 gap-4">
                 <h2 className="text-2xl font-bold">Day Book</h2>
-                <div className="w-full md:w-auto">
-                    <label className="block text-sm font-medium mb-1">Select Date</label>
-                    <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-full"/>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Left Side: Income & Expenditure */}
-                <div className="space-y-6">
-                     {/* Income */}
+                <div className="flex flex-col sm:flex-row gap-4 items-center">
                     <div>
-                         <div className="flex justify-between items-center mb-2">
-                             <h3 className="text-lg font-semibold text-green-600">Income (Credit)</h3>
-                             <Button size="sm" onClick={() => openIncomeModal()}><PlusIcon className="w-4 h-4" /> Add Other Income</Button>
-                        </div>
-                        <Card>
-                            <div className="overflow-y-auto max-h-[30rem] custom-scrollbar">
-                                <table className="w-full text-sm text-left">
-                                    <tbody>
-                                        {dailyFeePayments.map(p => {
-                                            const { title, subtitle } = getTransactionDescription('fee', p);
-                                            return (
-                                                <tr key={p.id} className="border-b dark:border-gray-700">
-                                                    <td className="p-2"><div className="font-medium">{title}</div><div className="text-xs text-gray-500">{subtitle}</div></td>
-                                                    <td className="p-2 text-right font-medium">{formatCurrency(p.amountPaid)}</td>
-                                                </tr>
-                                            );
-                                        })}
-                                        {dailyOtherIncome.map(i => {
-                                            const { title, subtitle } = getTransactionDescription('income', i);
-                                            return (
-                                                <tr key={i.id} className="border-b dark:border-gray-700">
-                                                    <td className="p-2"><div className="font-medium">{title}</div><div className="text-xs text-gray-500">{subtitle}</div>{i.remarks && <div className="text-xs italic text-gray-400">"{i.remarks}"</div>}</td>
-                                                    <td className="p-2 text-right font-medium">{formatCurrency(i.amount)}</td>
-                                                    <td className="p-2 text-right"><div className="flex gap-2 justify-end"><Button size="sm" variant="secondary" onClick={() => openIncomeModal(i)}><EditIcon className="w-4 h-4" /></Button><Button size="sm" variant="danger" onClick={() => handleDeleteIncome(i.id)}><TrashIcon className="w-4 h-4" /></Button></div></td>
-                                                </tr>
-                                            );
-                                        })}
-                                        {dailyFeePayments.length === 0 && dailyOtherIncome.length === 0 && <tr><td colSpan={3} className="p-4 text-center text-gray-500">No income recorded for this day.</td></tr>}
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div className="text-right font-bold p-2 mt-2 border-t dark:border-gray-600">
-                                Total Income: <span className="text-green-600">{formatCurrency(totalIncome)}</span>
-                            </div>
-                        </Card>
+                        <label className="block text-sm font-medium mb-1">From Date</label>
+                        <Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="w-full"/>
                     </div>
-                     {/* Expenditure */}
-                    <div>
-                        <div className="flex justify-between items-center mb-2">
-                             <h3 className="text-lg font-semibold text-red-600">Expenditure (Debit)</h3>
-                             <Button size="sm" onClick={() => openExpenditureModal()}><PlusIcon className="w-4 h-4" /> Add Expense</Button>
-                        </div>
-                        <Card>
-                             <div className="overflow-y-auto max-h-64 custom-scrollbar">
-                                <table className="w-full text-sm text-left">
-                                    <tbody>
-                                    {dailyExpenditure.map(e => {
-                                        const { title, subtitle } = getTransactionDescription('expenditure', e);
-                                        return (
-                                            <tr key={e.id} className="border-b dark:border-gray-700">
-                                                <td className="p-2"><div className="font-medium">{title}</div><div className="text-xs text-gray-500">{subtitle}</div>{e.remarks && <div className="text-xs italic text-gray-400">"{e.remarks}"</div>}</td>
-                                                <td className="p-2 text-right font-medium">{formatCurrency(e.amount)}</td>
-                                                <td className="p-2 text-right"><div className="flex gap-2 justify-end"><Button size="sm" variant="secondary" onClick={() => openExpenditureModal(e)}><EditIcon className="w-4 h-4" /></Button><Button size="sm" variant="danger" onClick={() => handleDeleteExpenditure(e.id)}><TrashIcon className="w-4 h-4" /></Button></div></td>
-                                            </tr>
-                                        )
-                                    })}
-                                    {dailyExpenditure.length === 0 && <tr><td colSpan={3} className="p-4 text-center text-gray-500">No expenditure recorded for this day.</td></tr>}
-                                    </tbody>
-                                </table>
-                             </div>
-                             <div className="text-right font-bold p-2 mt-2 border-t dark:border-gray-600">
-                                Total Expenditure: <span className="text-red-600">{formatCurrency(totalExpenditure)}</span>
-                             </div>
-                        </Card>
-                    </div>
-                </div>
-
-                {/* Right Side: Summary */}
-                <div className="space-y-6">
-                    <div>
-                        <div className="flex justify-between items-center mb-2">
-                            <h3 className="text-lg font-semibold">Summary</h3>
-                             <Button size="sm" variant="secondary" onClick={openOpeningBalanceModal}>
-                                {openingBalances.find(ob=>ob.id === selectedDate) ? 'Edit Opening Balance' : 'Set Opening Balance'}
-                            </Button>
-                        </div>
-                         <Card>
-                            <dl className="space-y-3">
-                                <div className="flex justify-between items-center">
-                                    <dt className="text-gray-500">Opening Balance</dt>
-                                    <dd className={`font-semibold ${effectiveOpeningBalance?.type === 'debit' ? 'text-red-500' : 'text-gray-800 dark:text-gray-200'}`}>
-                                        {formatCurrency(effectiveOpeningBalance?.amount || 0)} 
-                                        <span className="text-xs ml-1">({effectiveOpeningBalance?.type || 'N/A'})</span>
-                                    </dd>
-                                </div>
-                                <div className="flex justify-between items-center">
-                                    <dt className="text-gray-500">Total Income</dt>
-                                    <dd className="font-semibold text-green-500">{formatCurrency(totalIncome)}</dd>
-                                </div>
-                                 <div className="flex justify-between items-center">
-                                    <dt className="text-gray-500">Total Expenditure</dt>
-                                    <dd className="font-semibold text-red-500">{formatCurrency(totalExpenditure)}</dd>
-                                </div>
-                                <div className="flex justify-between items-center pt-3 border-t dark:border-gray-700">
-                                    <dt className="font-bold text-lg">Closing Balance</dt>
-                                    <dd className={`font-bold text-lg ${closingBalance < 0 ? 'text-red-500' : 'text-blue-600 dark:text-blue-400'}`}>{formatCurrency(closingBalance)}</dd>
-                                </div>
-                            </dl>
-                        </Card>
+                     <div>
+                        <label className="block text-sm font-medium mb-1">To Date</label>
+                        <Input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="w-full"/>
                     </div>
                 </div>
             </div>
 
-            <Modal isOpen={isOpeningBalanceModalOpen} onClose={() => setIsOpeningBalanceModalOpen(false)} title={`Set Opening Balance for ${new Date(selectedDate+'T00:00:00').toLocaleDateString()}`}>
+            <div className="mt-6 space-y-8">
+                {dailyBreakdown.length > 0 ? (
+                    dailyBreakdown.map(day => (
+                        <Card key={day.date} className="border-2 dark:border-gray-700 shadow-lg">
+                            <div className="p-4">
+                                <div className="flex flex-col sm:flex-row justify-between sm:items-center border-b dark:border-gray-600 pb-3 mb-4 gap-2">
+                                    <h3 className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                                        {new Date(day.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                                    </h3>
+                                    <Button size="sm" variant="secondary" onClick={() => openOpeningBalanceModal(day.date)}>
+                                        {openingBalances.find(ob=>ob.id === day.date) ? 'Edit O/B' : 'Set O/B'}
+                                    </Button>
+                                </div>
+
+                                <dl className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 text-center bg-gray-50 dark:bg-gray-900/50 p-4 rounded-lg">
+                                    <div>
+                                        <dt className="text-sm text-gray-500">Opening Balance</dt>
+                                        <dd className={`text-lg font-semibold ${day.openingBalance.type === 'debit' ? 'text-red-500' : ''}`}>{formatCurrency(day.openingBalance.amount)}</dd>
+                                    </div>
+                                    <div>
+                                        <dt className="text-sm text-gray-500">Total Income</dt>
+                                        <dd className="text-lg font-semibold text-green-500">{formatCurrency(day.totalIncome)}</dd>
+                                    </div>
+                                    <div>
+                                        <dt className="text-sm text-gray-500">Total Expenditure</dt>
+                                        <dd className="text-lg font-semibold text-red-500">{formatCurrency(day.totalExpenditure)}</dd>
+                                    </div>
+                                    <div>
+                                        <dt className="text-sm text-gray-500">Closing Balance</dt>
+                                        <dd className={`text-lg font-semibold ${day.closingBalance.type === 'debit' ? 'text-red-500' : 'text-blue-600'}`}>{formatCurrency(day.closingBalance.amount)}</dd>
+                                    </div>
+                                </dl>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    <div>
+                                        <div className="flex justify-between items-center mb-2">
+                                            <h4 className="font-semibold text-green-600">Income (Credit)</h4>
+                                            <Button size="sm" onClick={() => openIncomeModal(day.date)}><PlusIcon className="w-4 h-4"/> Add</Button>
+                                        </div>
+                                        <div className="border rounded-lg p-2 max-h-64 overflow-y-auto custom-scrollbar">
+                                            {day.dailyFeePayments.length === 0 && day.dailyOtherIncome.length === 0 ? <p className="text-center text-gray-500 p-4">No income</p> : (
+                                                <table className="w-full text-sm"><tbody>
+                                                    {day.dailyFeePayments.map(p => { const {title, subtitle} = getTransactionDescription('fee', p); return (<tr key={p.id} className="border-b dark:border-gray-700"><td className="p-2"><div className="font-medium">{title}</div><div className="text-xs text-gray-500">{subtitle}</div></td><td className="p-2 text-right font-medium">{formatCurrency(p.amountPaid)}</td></tr>); })}
+                                                    {day.dailyOtherIncome.map(i => { const {title, subtitle} = getTransactionDescription('income', i); return (<tr key={i.id} className="border-b dark:border-gray-700"><td className="p-2"><div className="font-medium">{title}</div><div className="text-xs text-gray-500">{subtitle}</div></td><td className="p-2 text-right font-medium">{formatCurrency(i.amount)}</td><td className="p-2 text-right"><div className="flex gap-1 justify-end"><Button size="sm" variant="secondary" onClick={() => openIncomeModal(day.date, i)}><EditIcon className="w-4 h-4" /></Button><Button size="sm" variant="danger" onClick={() => handleDeleteIncome(i.id)}><TrashIcon className="w-4 h-4" /></Button></div></td></tr>); })}
+                                                </tbody></table>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between items-center mb-2">
+                                            <h4 className="font-semibold text-red-600">Expenditure (Debit)</h4>
+                                            <Button size="sm" onClick={() => openExpenditureModal(day.date)}><PlusIcon className="w-4 h-4"/> Add</Button>
+                                        </div>
+                                         <div className="border rounded-lg p-2 max-h-64 overflow-y-auto custom-scrollbar">
+                                            {day.dailyExpenditure.length === 0 ? <p className="text-center text-gray-500 p-4">No expenditure</p> : (
+                                                <table className="w-full text-sm"><tbody>
+                                                    {day.dailyExpenditure.map(e => { const {title, subtitle} = getTransactionDescription('expenditure', e); return (<tr key={e.id} className="border-b dark:border-gray-700"><td className="p-2"><div className="font-medium">{title}</div><div className="text-xs text-gray-500">{subtitle}</div></td><td className="p-2 text-right font-medium">{formatCurrency(e.amount)}</td><td className="p-2 text-right"><div className="flex gap-1 justify-end"><Button size="sm" variant="secondary" onClick={() => openExpenditureModal(day.date, e)}><EditIcon className="w-4 h-4" /></Button><Button size="sm" variant="danger" onClick={() => handleDeleteExpenditure(e.id)}><TrashIcon className="w-4 h-4" /></Button></div></td></tr>); })}
+                                                </tbody></table>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </Card>
+                    ))
+                ) : (
+                    <div className="text-center py-10 text-gray-500">
+                        <BookOpenIcon className="w-12 h-12 mx-auto mb-2" />
+                        <p>No financial records found for the selected date range.</p>
+                    </div>
+                )}
+            </div>
+
+            <Modal isOpen={isOpeningBalanceModalOpen} onClose={() => setIsOpeningBalanceModalOpen(false)} title={`Set Opening Balance for ${new Date(dateForOBModal+'T00:00:00').toLocaleDateString()}`}>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Set a manual opening balance for this date. This will override the automatic calculation from the previous day's closing balance. Set amount to 0 to remove manual override.</p>
                 <div className="space-y-4">
                      <div>
@@ -2257,7 +2255,7 @@ const DayBookManager: React.FC<{
                     </div>
                     <div>
                         <label className="block text-sm font-medium mb-1">Type</label>
-                        <Select value={openingBalanceForm.type} onChange={e => setOpeningBalanceForm({...openingBalanceForm, type: e.target.value as 'credit' | 'debit'})}>
+                        <Select value={openingBalanceForm.type} onChange={e => setOpeningBalanceForm(prev => ({...prev, type: e.target.value as 'credit' | 'debit'}))}>
                             <option value="credit">Credit (Cash in Hand)</option>
                             <option value="debit">Debit (Amount Owed)</option>
                         </Select>
@@ -2271,7 +2269,7 @@ const DayBookManager: React.FC<{
                         <label className="block text-sm font-medium mb-1">Paid To (Account)</label>
                         <Select value={currentExpenditure?.accountId || ''} onChange={e => setCurrentExpenditure({...currentExpenditure, accountId: e.target.value})}>
                             <option value="">-- Select Account --</option>
-                            {userCreatedAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                            {userCreatedAccounts.map(a => <option key={a.id} value={a.id}>{a.fatherName ? `${a.name} / ${a.fatherName}` : a.name}</option>)}
                         </Select>
                     </div>
                      <div>
@@ -2291,7 +2289,7 @@ const DayBookManager: React.FC<{
                         <label className="block text-sm font-medium mb-1">Received From (Account)</label>
                         <Select value={currentIncome?.accountId || ''} onChange={e => setCurrentIncome({...currentIncome, accountId: e.target.value})}>
                             <option value="">-- Select Account --</option>
-                            {userCreatedAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                            {userCreatedAccounts.map(a => <option key={a.id} value={a.id}>{a.fatherName ? `${a.name} / ${a.fatherName}` : a.name}</option>)}
                         </Select>
                     </div>
                     <div>
