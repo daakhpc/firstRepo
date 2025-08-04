@@ -1,4 +1,8 @@
-import { CollegeInfo, ClassInfo, Student, Holiday, AttendanceData, User, WorkableSunday, FeeHead, ClassFee, FeePayment, FeeConcession, OpeningBalance, Expenditure } from '../types';
+import { 
+    CollegeInfo, ClassInfo, Student, Holiday, AttendanceData, User, WorkableSunday, 
+    FeeHead, ClassFee, FeePayment, FeeConcession, OpeningBalance, Expenditure,
+    AccountCategory, Account, IncomeEntry
+} from '../types';
 
 const DB_PREFIX = 'attendanceApp_';
 
@@ -138,7 +142,25 @@ export const db = {
   saveFeeConcessions: (concessions: FeeConcession[]): Promise<void> =>
     simulateDB(() => saveScopedData('feeConcessions', concessions)),
 
-  // --- Day Book ---
+  // --- Day Book & Accounting ---
+  getAccountCategories: (): Promise<AccountCategory[]> =>
+    simulateDB(() => getScopedData('accountCategories', [])),
+
+  saveAccountCategories: (categories: AccountCategory[]): Promise<void> =>
+    simulateDB(() => saveScopedData('accountCategories', categories)),
+
+  getAccounts: (): Promise<Account[]> =>
+    simulateDB(() => getScopedData('accounts', [])),
+
+  saveAccounts: (accounts: Account[]): Promise<void> =>
+    simulateDB(() => saveScopedData('accounts', accounts)),
+
+  getIncomeEntries: (): Promise<IncomeEntry[]> =>
+    simulateDB(() => getScopedData('incomeEntries', [])),
+    
+  saveIncomeEntries: (entries: IncomeEntry[]): Promise<void> =>
+    simulateDB(() => saveScopedData('incomeEntries', entries)),
+
   getOpeningBalances: (): Promise<OpeningBalance[]> =>
     simulateDB(() => getScopedData('openingBalances', [])),
 

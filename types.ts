@@ -75,7 +75,29 @@ export interface FeePayment {
     remarks?: string;
 }
 
-// --- Day Book Types ---
+// --- Day Book & Accounting Types ---
+export interface AccountCategory {
+  id: string;
+  name: string;
+  isSystem?: boolean; // To protect class categories
+}
+
+export interface Account {
+  id: string;
+  name: string;
+  categoryId: string;
+  isStudentAccount?: boolean;
+  studentId?: string;
+}
+
+export interface IncomeEntry {
+    id: string;
+    date: string; // YYYY-MM-DD
+    accountId: string;
+    description: string;
+    amount: number;
+}
+
 export interface OpeningBalance {
     id: string; // YYYY-MM-DD
     amount: number;
@@ -87,6 +109,7 @@ export interface Expenditure {
     date: string; // YYYY-MM-DD
     description: string;
     amount: number;
+    accountId: string;
 }
 
 
@@ -112,6 +135,9 @@ export interface BackupData {
     feeConcessions: FeeConcession[];
     openingBalances: OpeningBalance[];
     expenditures: Expenditure[];
+    accountCategories: AccountCategory[];
+    accounts: Account[];
+    incomeEntries: IncomeEntry[];
 }
 
-export type ViewType = 'dashboard' | 'college' | 'classes' | 'students' | 'attendance' | 'holidays' | 'users' | 'workableSundays' | 'fees' | 'backup' | 'daybook';
+export type ViewType = 'dashboard' | 'college' | 'classes' | 'students' | 'attendance' | 'holidays' | 'users' | 'workableSundays' | 'fees' | 'backup' | 'daybook' | 'accounts';

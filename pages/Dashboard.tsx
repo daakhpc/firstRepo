@@ -3,7 +3,7 @@ import {
     CollegeInfo, ClassInfo, Student, Holiday, ViewType, AttendanceData, 
     AttendanceStatus, DailyAttendance, User, UserRole, WorkableSunday,
     FeeHead, ClassFee, FeePayment, FeeConcession, BackupData,
-    OpeningBalance, Expenditure
+    OpeningBalance, Expenditure, AccountCategory, Account, IncomeEntry
 } from '../types';
 import { db } from '../services/db';
 import { 
@@ -83,7 +83,11 @@ const CollegeInfoManager: React.FC<{ info: CollegeInfo; onSave: (info: CollegeIn
     );
 };
 
-const ClassManager: React.FC<{ classes: ClassInfo[]; onSave: (classes: ClassInfo[]) => Promise<void>; onSelectClass: (id: string) => void }> = ({ classes, onSave, onSelectClass }) => {
+const ClassManager: React.FC<{ 
+    classes: ClassInfo[]; 
+    onSave: (classes: ClassInfo[]) => Promise<void>; 
+    onSelectClass: (id: string) => void;
+}> = ({ classes, onSave, onSelectClass }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [currentClass, setCurrentClass] = useState<Partial<ClassInfo> | null>(null);
     const [isSaving, setIsSaving] = useState(false);
@@ -141,7 +145,13 @@ const ClassManager: React.FC<{ classes: ClassInfo[]; onSave: (classes: ClassInfo
     );
 };
 
-const StudentManager: React.FC<{ students: Student[]; classes: ClassInfo[]; classId: string; onSave: (students: Student[]) => Promise<void>; onBack: () => void; }> = ({ students, classes, classId, onSave, onBack }) => {
+const StudentManager: React.FC<{ 
+    students: Student[]; 
+    classes: ClassInfo[]; 
+    classId: string; 
+    onSave: (students: Student[], newStudents?: Student[]) => Promise<void>; // Pass new students for account creation
+    onBack: () => void; 
+}> = ({ students, classes, classId, onSave, onBack }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [currentStudent, setCurrentStudent] = useState<Partial<Student> | null>(null);
     const [isSaving, setIsSaving] = useState(false);
@@ -156,12 +166,14 @@ const StudentManager: React.FC<{ students: Student[]; classes: ClassInfo[]; clas
         if (!currentStudent?.name || !currentStudent.studentId) return;
         setIsSaving(true);
         let updatedStudents;
+        let newStudent: Student | undefined;
         if (currentStudent.id) {
             updatedStudents = students.map(s => s.id === currentStudent.id ? { ...currentStudent as Student } : s);
         } else {
-            updatedStudents = [...students, { ...currentStudent, id: generateId(), classId } as Student];
+            newStudent = { ...currentStudent, id: generateId(), classId } as Student;
+            updatedStudents = [...students, newStudent];
         }
-        await onSave(updatedStudents);
+        await onSave(updatedStudents, newStudent ? [newStudent] : []);
         setIsSaving(false);
         setIsModalOpen(false);
     };
@@ -189,7 +201,7 @@ const StudentManager: React.FC<{ students: Student[]; classes: ClassInfo[]; clas
             }).filter(Boolean) as Student[];
 
             if(newStudents.length > 0) {
-                 await onSave([...students, ...newStudents]);
+                 await onSave([...students, ...newStudents], newStudents);
                  alert(`${newStudents.length} students added successfully.`);
             } else {
                  alert('Could not parse CSV or file is empty. Expected format: StudentId,Name,FatherName,MotherName');
@@ -1065,7 +1077,8 @@ const BackupRestoreManager: React.FC<{
 
                 const requiredKeys: (keyof BackupData)[] = [
                     'collegeInfo', 'classes', 'students', 'holidays', 'workableSundays', 'attendance', 
-                    'feeHeads', 'classFees', 'feePayments', 'feeConcessions', 'openingBalances', 'expenditures'
+                    'feeHeads', 'classFees', 'feePayments', 'feeConcessions', 'openingBalances', 'expenditures',
+                    'accountCategories', 'accounts', 'incomeEntries'
                 ];
                 const hasAllKeys = requiredKeys.every(key => key in data);
 
@@ -1593,15 +1606,192 @@ const FeeManager: React.FC<{
     );
 };
 
+const AccountManager: React.FC<{
+    accounts: Account[];
+    accountCategories: AccountCategory[];
+    onSaveAccounts: (data: Account[]) => Promise<void>;
+    onSaveAccountCategories: (data: AccountCategory[]) => Promise<void>;
+}> = ({ accounts, accountCategories, onSaveAccounts, onSaveAccountCategories }) => {
+    
+    type AccountManagerTab = 'accounts' | 'categories';
+    const [activeTab, setActiveTab] = useState<AccountManagerTab>('accounts');
+    const [isSaving, setIsSaving] = useState(false);
+
+    // Category Modal
+    const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+    const [currentCategory, setCurrentCategory] = useState<Partial<AccountCategory> | null>(null);
+
+    // Account Modal
+    const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+    const [currentAccount, setCurrentAccount] = useState<Partial<Account> | null>(null);
+
+    const TabButton: React.FC<{tabId: AccountManagerTab, children: React.ReactNode}> = ({ tabId, children }) => (
+        <button
+            onClick={() => setActiveTab(tabId)}
+            className={`px-4 py-2 font-semibold border-b-2 transition-colors ${activeTab === tabId ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+        >
+            {children}
+        </button>
+    );
+
+    // --- Category Logic ---
+    const openCategoryModal = (cat: Partial<AccountCategory> | null = null) => {
+        setCurrentCategory(cat || { id: '', name: '' });
+        setIsCategoryModalOpen(true);
+    };
+
+    const handleSaveCategory = async () => {
+        if (!currentCategory?.name) return;
+        setIsSaving(true);
+        const updated = currentCategory.id 
+            ? accountCategories.map(c => c.id === currentCategory.id ? { ...c, name: currentCategory.name as string } : c)
+            : [...accountCategories, { id: generateId(), name: currentCategory.name, isSystem: false }];
+        await onSaveAccountCategories(updated as AccountCategory[]);
+        setIsSaving(false);
+        setIsCategoryModalOpen(false);
+    };
+
+    const handleDeleteCategory = (id: string) => {
+        if (accounts.some(acc => acc.categoryId === id)) {
+            alert('Cannot delete category. It is currently used by one or more accounts.');
+            return;
+        }
+        if (window.confirm('Are you sure?')) {
+            onSaveAccountCategories(accountCategories.filter(c => c.id !== id));
+        }
+    };
+
+    // --- Account Logic ---
+    const openAccountModal = (acc: Partial<Account> | null = null) => {
+        setCurrentAccount(acc || { id: '', name: '', categoryId: '' });
+        setIsAccountModalOpen(true);
+    };
+
+    const handleSaveAccount = async () => {
+        if (!currentAccount?.name || !currentAccount.categoryId) {
+            alert('Please provide an account name and select a category.');
+            return;
+        }
+        setIsSaving(true);
+        const updated = currentAccount.id
+            ? accounts.map(a => a.id === currentAccount.id ? {...a, ...currentAccount} : a)
+            : [...accounts, { ...currentAccount, id: generateId(), isStudentAccount: false }];
+        await onSaveAccounts(updated as Account[]);
+        setIsSaving(false);
+        setIsAccountModalOpen(false);
+    };
+    
+    const handleDeleteAccount = (id: string) => {
+        if (window.confirm('Are you sure? This may affect Day Book records.')) {
+            onSaveAccounts(accounts.filter(a => a.id !== id));
+        }
+    };
+    
+    const accountsByCategory = useMemo(() => {
+        return accountCategories.map(cat => ({
+            ...cat,
+            accounts: accounts.filter(acc => acc.categoryId === cat.id)
+        })).filter(g => g.accounts.length > 0);
+    }, [accounts, accountCategories]);
+
+    return (
+        <Card>
+            <h2 className="text-2xl font-bold mb-4">Account Management</h2>
+             <div className="border-b mb-6 flex space-x-4">
+                <TabButton tabId="accounts">Accounts</TabButton>
+                <TabButton tabId="categories">Categories</TabButton>
+            </div>
+
+            {activeTab === 'accounts' && (
+                <div>
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-xl font-semibold">Accounts</h3>
+                        <Button onClick={() => openAccountModal()}><PlusIcon /> Add Account</Button>
+                    </div>
+                    <div className="space-y-4">
+                        {accountsByCategory.map(group => (
+                             <div key={group.id}>
+                                <h4 className="font-bold text-lg mb-2 p-2 bg-gray-100 dark:bg-gray-700/50 rounded-md">{group.name}</h4>
+                                <ul className="space-y-2 pl-4">
+                                    {group.accounts.map(acc => (
+                                        <li key={acc.id} className="flex justify-between items-center p-2 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                            <div className="font-medium">
+                                                {acc.name}
+                                                {acc.isStudentAccount && <span className="text-xs ml-2 text-gray-500">(Student)</span>}
+                                            </div>
+                                            {!acc.isStudentAccount && (
+                                                <div className="flex gap-2">
+                                                    <Button variant="secondary" size="sm" onClick={() => openAccountModal(acc)}><EditIcon/></Button>
+                                                    <Button variant="danger" size="sm" onClick={() => handleDeleteAccount(acc.id)}><TrashIcon/></Button>
+                                                </div>
+                                            )}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+            
+            {activeTab === 'categories' && (
+                <div>
+                     <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-xl font-semibold">Account Categories</h3>
+                        <Button onClick={() => openCategoryModal()}><PlusIcon /> Add Category</Button>
+                    </div>
+                    <ul className="space-y-2">
+                        {accountCategories.map(cat => (
+                             <li key={cat.id} className="flex justify-between items-center p-3 bg-gray-100 dark:bg-gray-700 rounded-md">
+                                <span className="font-medium">{cat.name} {cat.isSystem && <span className="text-xs ml-2 text-gray-500">(System - Class)</span>}</span>
+                                {!cat.isSystem && (
+                                    <div className="flex gap-2">
+                                        <Button variant="secondary" size="sm" onClick={() => openCategoryModal(cat)}><EditIcon/></Button>
+                                        <Button variant="danger" size="sm" onClick={() => handleDeleteCategory(cat.id)}><TrashIcon/></Button>
+                                    </div>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
+             <Modal isOpen={isCategoryModalOpen} onClose={() => setIsCategoryModalOpen(false)} title={currentCategory?.id ? 'Edit Category' : 'Add Category'}>
+                <Input placeholder="Category Name" value={currentCategory?.name || ''} onChange={e => setCurrentCategory({...currentCategory, name: e.target.value})} />
+                <Button onClick={handleSaveCategory} isLoading={isSaving} className="mt-4">Save</Button>
+            </Modal>
+             <Modal isOpen={isAccountModalOpen} onClose={() => setIsAccountModalOpen(false)} title={currentAccount?.id ? 'Edit Account' : 'Add Account'}>
+                <div className="space-y-4">
+                     <div>
+                        <label className="block text-sm font-medium mb-1">Account Name</label>
+                        <Input placeholder="e.g., Office Supplies" value={currentAccount?.name || ''} onChange={e => setCurrentAccount({...currentAccount, name: e.target.value})} />
+                    </div>
+                     <div>
+                        <label className="block text-sm font-medium mb-1">Category</label>
+                        <Select value={currentAccount?.categoryId || ''} onChange={e => setCurrentAccount({...currentAccount, categoryId: e.target.value})}>
+                            <option value="">-- Select Category --</option>
+                            {accountCategories.filter(c => !c.isSystem).map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                        </Select>
+                    </div>
+                    <Button onClick={handleSaveAccount} isLoading={isSaving} className="mt-4">Save</Button>
+                </div>
+            </Modal>
+        </Card>
+    );
+}
+
 const DayBookManager: React.FC<{
-    students: Student[];
-    classes: ClassInfo[];
-    feePayments: FeePayment[];
+    accounts: Account[];
+    accountCategories: AccountCategory[];
+    incomeEntries: IncomeEntry[];
     openingBalances: OpeningBalance[];
     expenditures: Expenditure[];
     onSaveOpeningBalances: (balances: OpeningBalance[]) => Promise<void>;
     onSaveExpenditures: (expenditures: Expenditure[]) => Promise<void>;
-}> = ({ students, classes, feePayments, openingBalances, expenditures, onSaveOpeningBalances, onSaveExpenditures }) => {
+    onSaveIncomeEntries: (entries: IncomeEntry[]) => Promise<void>;
+}> = ({ accounts, accountCategories, incomeEntries, openingBalances, expenditures, onSaveOpeningBalances, onSaveExpenditures, onSaveIncomeEntries }) => {
     
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [isSaving, setIsSaving] = useState(false);
@@ -1613,13 +1803,16 @@ const DayBookManager: React.FC<{
     const [isExpenditureModalOpen, setIsExpenditureModalOpen] = useState(false);
     const [currentExpenditure, setCurrentExpenditure] = useState<Partial<Expenditure> | null>(null);
 
+    const [isIncomeModalOpen, setIsIncomeModalOpen] = useState(false);
+    const [currentIncome, setCurrentIncome] = useState<Partial<IncomeEntry> | null>(null);
+
     // Filtered data for the view
-    const dailyIncome = useMemo(() => feePayments.filter(p => p.paymentDate === selectedDate), [feePayments, selectedDate]);
+    const dailyIncome = useMemo(() => incomeEntries.filter(p => p.date === selectedDate), [incomeEntries, selectedDate]);
     const dailyExpenditure = useMemo(() => expenditures.filter(e => e.date === selectedDate), [expenditures, selectedDate]);
     const openingBalance = useMemo(() => openingBalances.find(ob => ob.id === selectedDate), [openingBalances, selectedDate]);
 
     // Totals
-    const totalIncome = dailyIncome.reduce((sum, p) => sum + p.amountPaid, 0);
+    const totalIncome = dailyIncome.reduce((sum, p) => sum + p.amount, 0);
     const totalExpenditure = dailyExpenditure.reduce((sum, e) => sum + e.amount, 0);
     
     // Calculate Closing Balance
@@ -1648,15 +1841,45 @@ const DayBookManager: React.FC<{
         setIsOpeningBalanceModalOpen(false);
     };
 
+    // Income handlers
+    const openIncomeModal = (entry: Partial<IncomeEntry> | null = null) => {
+        setCurrentIncome(entry || { id: '', date: selectedDate, description: '', amount: 0, accountId: '' });
+        setIsIncomeModalOpen(true);
+    };
+
+    const handleSaveIncome = async () => {
+        if (!currentIncome || !currentIncome.accountId || currentIncome.amount <= 0) {
+            alert('Please select an account and enter a valid amount.');
+            return;
+        }
+        setIsSaving(true);
+        let updatedEntries;
+        if (currentIncome.id) {
+            updatedEntries = incomeEntries.map(e => e.id === currentIncome.id ? {...currentIncome as IncomeEntry} : e);
+        } else {
+            updatedEntries = [...incomeEntries, {...currentIncome as Omit<IncomeEntry, 'id'>, id: generateId()}];
+        }
+        await onSaveIncomeEntries(updatedEntries);
+        setIsSaving(false);
+        setIsIncomeModalOpen(false);
+    };
+
+    const handleDeleteIncome = (id: string) => {
+        if (window.confirm('Are you sure you want to delete this income entry?')) {
+            onSaveIncomeEntries(incomeEntries.filter(e => e.id !== id));
+        }
+    };
+
+
     // Expenditure handlers
     const openExpenditureModal = (exp: Partial<Expenditure> | null = null) => {
-        setCurrentExpenditure(exp || { id: '', date: selectedDate, description: '', amount: 0 });
+        setCurrentExpenditure(exp || { id: '', date: selectedDate, description: '', amount: 0, accountId: '' });
         setIsExpenditureModalOpen(true);
     };
 
     const handleSaveExpenditure = async () => {
-        if (!currentExpenditure || !currentExpenditure.description || currentExpenditure.amount <= 0) {
-            alert('Please enter a description and a valid amount.');
+        if (!currentExpenditure || !currentExpenditure.description || !currentExpenditure.accountId || currentExpenditure.amount <= 0) {
+            alert('Please select an account, enter a description, and a valid amount.');
             return;
         }
         setIsSaving(true);
@@ -1676,6 +1899,8 @@ const DayBookManager: React.FC<{
             onSaveExpenditures(expenditures.filter(e => e.id !== id));
         }
     };
+    
+    const getAccountName = (accountId: string) => accounts.find(a => a.id === accountId)?.name || 'Unknown Account';
 
     return (
         <Card>
@@ -1692,27 +1917,30 @@ const DayBookManager: React.FC<{
                 <div className="space-y-6">
                      {/* Income */}
                     <div>
-                        <h3 className="text-lg font-semibold mb-2 text-green-600">Income (Credit)</h3>
+                         <div className="flex justify-between items-center mb-2">
+                             <h3 className="text-lg font-semibold text-green-600">Income (Credit)</h3>
+                             <Button size="sm" onClick={() => openIncomeModal()}><PlusIcon className="w-4 h-4" /> Add Income</Button>
+                        </div>
                         <Card>
                             <div className="overflow-y-auto max-h-64 custom-scrollbar">
                                 <table className="w-full text-sm text-left">
                                     <tbody>
-                                        {dailyIncome.map(p => {
-                                            const student = students.find(s => s.id === p.studentId);
-                                            const studentClass = student ? classes.find(c => c.id === student.classId) : null;
-                                            
-                                            const paymentDescription = student 
-                                                ? `${student.name} / ${student.fatherName} / ${student.studentId}${studentClass ? ` / ${studentClass.name}` : ''}`
-                                                : "Fee Payment from Student";
-
-                                            return (
+                                        {dailyIncome.map(p => (
                                             <tr key={p.id} className="border-b dark:border-gray-700">
-                                                <td className="p-2">{paymentDescription}</td>
-                                                <td className="p-2 text-right font-medium">{formatCurrency(p.amountPaid)}</td>
+                                                <td className="p-2">
+                                                    <div>{getAccountName(p.accountId)}</div>
+                                                    <div className="text-xs text-gray-500">{p.description}</div>
+                                                </td>
+                                                <td className="p-2 text-right font-medium">{formatCurrency(p.amount)}</td>
+                                                <td className="p-2 text-right">
+                                                    <div className="flex gap-2 justify-end">
+                                                        <Button size="sm" variant="secondary" onClick={() => openIncomeModal(p)}><EditIcon className="w-4 h-4" /></Button>
+                                                        <Button size="sm" variant="danger" onClick={() => handleDeleteIncome(p.id)}><TrashIcon className="w-4 h-4" /></Button>
+                                                    </div>
+                                                </td>
                                             </tr>
-                                            )
-                                        })}
-                                        {dailyIncome.length === 0 && <tr><td colSpan={2} className="p-4 text-center text-gray-500">No income recorded for this day.</td></tr>}
+                                        ))}
+                                        {dailyIncome.length === 0 && <tr><td colSpan={3} className="p-4 text-center text-gray-500">No income recorded for this day.</td></tr>}
                                     </tbody>
                                 </table>
                             </div>
@@ -1730,7 +1958,10 @@ const DayBookManager: React.FC<{
                                     <tbody>
                                     {dailyExpenditure.map(e => (
                                         <tr key={e.id} className="border-b dark:border-gray-700">
-                                            <td className="p-2">{e.description}</td>
+                                            <td className="p-2">
+                                                <div>{e.description}</div>
+                                                <div className="text-xs text-gray-500">{getAccountName(e.accountId)}</div>
+                                            </td>
                                             <td className="p-2 text-right font-medium">{formatCurrency(e.amount)}</td>
                                             <td className="p-2 text-right">
                                                 <div className="flex gap-2 justify-end">
@@ -1803,6 +2034,13 @@ const DayBookManager: React.FC<{
              <Modal isOpen={isExpenditureModalOpen} onClose={() => setIsExpenditureModalOpen(false)} title={currentExpenditure?.id ? "Edit Expenditure" : "Add Expenditure"}>
                 <div className="space-y-4">
                      <div>
+                        <label className="block text-sm font-medium mb-1">Account</label>
+                        <Select value={currentExpenditure?.accountId || ''} onChange={e => setCurrentExpenditure({...currentExpenditure, accountId: e.target.value})}>
+                            <option value="">-- Select Account --</option>
+                            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </Select>
+                    </div>
+                     <div>
                         <label className="block text-sm font-medium mb-1">Description</label>
                         <Input value={currentExpenditure?.description || ''} onChange={e => setCurrentExpenditure({...currentExpenditure, description: e.target.value})} />
                     </div>
@@ -1811,6 +2049,26 @@ const DayBookManager: React.FC<{
                         <Input type="number" value={currentExpenditure?.amount || ''} onChange={e => setCurrentExpenditure({...currentExpenditure, amount: parseFloat(e.target.value) || 0})} />
                     </div>
                     <Button onClick={handleSaveExpenditure} isLoading={isSaving}>Save</Button>
+                </div>
+            </Modal>
+            <Modal isOpen={isIncomeModalOpen} onClose={() => setIsIncomeModalOpen(false)} title={currentIncome?.id ? "Edit Income Entry" : "Add Income Entry"}>
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Account</label>
+                        <Select value={currentIncome?.accountId || ''} onChange={e => setCurrentIncome({...currentIncome, accountId: e.target.value})}>
+                            <option value="">-- Select Account --</option>
+                            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </Select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Description</label>
+                        <Input placeholder="e.g., Received from..." value={currentIncome?.description || ''} onChange={e => setCurrentIncome({...currentIncome, description: e.target.value})} />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Amount</label>
+                        <Input type="number" value={currentIncome?.amount || ''} onChange={e => setCurrentIncome({...currentIncome, amount: parseFloat(e.target.value) || 0})} />
+                    </div>
+                    <Button onClick={handleSaveIncome} isLoading={isSaving}>Save</Button>
                 </div>
             </Modal>
         </Card>
@@ -1846,6 +2104,9 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
     const [feeConcessions, setFeeConcessions] = useState<FeeConcession[]>([]);
     const [openingBalances, setOpeningBalances] = useState<OpeningBalance[]>([]);
     const [expenditures, setExpenditures] = useState<Expenditure[]>([]);
+    const [accountCategories, setAccountCategories] = useState<AccountCategory[]>([]);
+    const [accounts, setAccounts] = useState<Account[]>([]);
+    const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
 
     
     useEffect(() => {
@@ -1861,17 +2122,19 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
                     const [
                         info, classesData, studentsData, holidaysData, workableSundaysData, attendanceData,
                         feeHeadsData, classFeesData, feePaymentsData, feeConcessionsData, openingBalancesData,
-                        expendituresData
+                        expendituresData, accountCategoriesData, accountsData, incomeEntriesData
                     ] = await Promise.all([
                         db.getCollegeInfo(), db.getClasses(), db.getStudents(), db.getHolidays(), 
                         db.getWorkableSundays(), db.getAttendance(), db.getFeeHeads(), db.getClassFees(), db.getFeePayments(),
-                        db.getFeeConcessions(), db.getOpeningBalances(), db.getExpenditures()
+                        db.getFeeConcessions(), db.getOpeningBalances(), db.getExpenditures(), db.getAccountCategories(),
+                        db.getAccounts(), db.getIncomeEntries()
                     ]);
                     setCollegeInfo(info); setClasses(classesData); setStudents(studentsData); 
                     setHolidays(holidaysData); setWorkableSundays(workableSundaysData); setAttendance(attendanceData);
                     setFeeHeads(feeHeadsData); setClassFees(classFeesData); setFeePayments(feePaymentsData);
                     setFeeConcessions(feeConcessionsData); setOpeningBalances(openingBalancesData);
                     setExpenditures(expendituresData);
+                    setAccountCategories(accountCategoriesData); setAccounts(accountsData); setIncomeEntries(incomeEntriesData);
                 }
             } catch (error) {
                 console.error("Failed to load data", error); showToast("Failed to load data from storage.", 'error');
@@ -1889,28 +2152,94 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
     };
 
     const handleSaveClasses = async (updatedClasses: ClassInfo[]) => {
-        const deletedClassIds = classes.filter(c => !updatedClasses.some(uc => uc.id === c.id)).map(c => c.id);
+        const originalClasses = [...classes];
+        
+        let updatedCategories = [...accountCategories];
+        let wasChanged = false;
+
+        // Handle deletions
+        const deletedClassIds = originalClasses.filter(c => !updatedClasses.some(uc => uc.id === c.id)).map(c => c.id);
         if (deletedClassIds.length > 0) {
-            // Delete students of deleted classes
+            const deletedClassNames = originalClasses.filter(c => deletedClassIds.includes(c.id)).map(c => c.name);
+            updatedCategories = updatedCategories.filter(cat => !(cat.isSystem && deletedClassNames.includes(cat.name)));
+            wasChanged = true;
+            // Cascade delete students and related data
             const updatedStudents = students.filter(s => !deletedClassIds.includes(s.classId));
-            await handleSaveStudents(updatedStudents); // This will cascade delete payments
-            // Delete class fee assignments
+            await handleSaveStudents(updatedStudents);
             const updatedClassFees = classFees.filter(cf => !deletedClassIds.includes(cf.classId));
             await handleSaveClassFees(updatedClassFees);
         }
+
+        // Handle renames
+        for (const updatedClass of updatedClasses) {
+            const originalClass = originalClasses.find(c => c.id === updatedClass.id);
+            if (originalClass && originalClass.name !== updatedClass.name) {
+                const categoryToUpdate = updatedCategories.find(cat => cat.isSystem && cat.name === originalClass.name);
+                if (categoryToUpdate) {
+                    updatedCategories = updatedCategories.map(cat => cat.id === categoryToUpdate.id ? {...cat, name: updatedClass.name} : cat);
+                    wasChanged = true;
+                }
+            }
+        }
+        
+        if (wasChanged) {
+            await handleSaveAccountCategories(updatedCategories);
+        }
+        
         await db.saveClasses(updatedClasses); setClasses(updatedClasses); showToast('Classes updated!', 'success');
     };
 
-    const handleSaveStudents = async (updatedStudents: Student[]) => {
-        const deletedStudentIds = students.filter(s => !updatedStudents.some(us => us.id === s.id)).map(s => s.id);
+    const handleSaveStudents = async (updatedStudents: Student[], newStudents: Student[] = []) => {
+        const originalStudents = [...students];
+        let finalAccounts = [...accounts];
+        let finalCategories = [...accountCategories];
+        let categoriesChanged = false;
+
+        // Handle additions
+        if (newStudents.length > 0) {
+            const newAccounts: Account[] = [];
+            const newCategories: AccountCategory[] = [];
+            
+            for (const student of newStudents) {
+                const className = classes.find(c => c.id === student.classId)?.name;
+                if (className) {
+                    let category = finalCategories.find(c => c.name === className && c.isSystem);
+                    if (!category) {
+                        category = { id: generateId(), name: className, isSystem: true };
+                        newCategories.push(category);
+                        finalCategories.push(category); // Add to current list for subsequent lookups in the loop
+                        categoriesChanged = true;
+                    }
+                    newAccounts.push({
+                        id: generateId(),
+                        name: student.name,
+                        categoryId: category.id,
+                        isStudentAccount: true,
+                        studentId: student.id,
+                    });
+                }
+            }
+            if (newAccounts.length > 0) {
+                finalAccounts.push(...newAccounts);
+            }
+            if (categoriesChanged) {
+                await handleSaveAccountCategories(finalCategories);
+            }
+            await handleSaveAccounts(finalAccounts);
+        }
+
+        // Handle deletions
+        const deletedStudentIds = originalStudents.filter(s => !updatedStudents.some(us => us.id === s.id)).map(s => s.id);
         if (deletedStudentIds.length > 0) {
-            // Delete payments of deleted students
+            finalAccounts = finalAccounts.filter(acc => !acc.isStudentAccount || !deletedStudentIds.includes(acc.studentId!));
+            await handleSaveAccounts(finalAccounts);
+            // Delete payments & concessions of deleted students
             const updatedFeePayments = feePayments.filter(fp => !deletedStudentIds.includes(fp.studentId));
             await handleSaveFeePayments(updatedFeePayments);
-             // Delete concessions of deleted students
             const updatedFeeConcessions = feeConcessions.filter(fc => !deletedStudentIds.includes(fc.studentId));
             await handleSaveFeeConcessions(updatedFeeConcessions);
         }
+
         await db.saveStudents(updatedStudents); setStudents(updatedStudents); showToast('Students updated!', 'success');
     };
     
@@ -1950,6 +2279,15 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
     const handleSaveExpenditures = async (data: Expenditure[]) => {
         await db.saveExpenditures(data); setExpenditures(data); showToast('Expenditures updated!', 'success');
     };
+    const handleSaveAccountCategories = async (data: AccountCategory[]) => {
+        await db.saveAccountCategories(data); setAccountCategories(data); showToast('Account categories updated!', 'success');
+    };
+    const handleSaveAccounts = async (data: Account[]) => {
+        await db.saveAccounts(data); setAccounts(data); showToast('Accounts updated!', 'success');
+    };
+    const handleSaveIncomeEntries = async (data: IncomeEntry[]) => {
+        await db.saveIncomeEntries(data); setIncomeEntries(data); showToast('Income entries updated!', 'success');
+    };
 
     const handleRestoreData = async (data: BackupData) => {
         try {
@@ -1965,6 +2303,9 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
             await db.saveFeeConcessions(data.feeConcessions);
             await db.saveOpeningBalances(data.openingBalances || []);
             await db.saveExpenditures(data.expenditures || []);
+            await db.saveAccountCategories(data.accountCategories || []);
+            await db.saveAccounts(data.accounts || []);
+            await db.saveIncomeEntries(data.incomeEntries || []);
     
             showToast('Data restored successfully! The page will now reload.', 'success');
             
@@ -2001,12 +2342,13 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
                 const allData: BackupData = {
                     collegeInfo, classes, students, holidays, workableSundays, 
                     attendance, feeHeads, classFees, feePayments, feeConcessions,
-                    openingBalances, expenditures
+                    openingBalances, expenditures, accountCategories, accounts, incomeEntries
                 };
                 return <BackupRestoreManager allData={allData} onRestore={handleRestoreData} />;
             }
             case 'fees': return <FeeManager classes={classes} students={students} feeHeads={feeHeads} classFees={classFees} feePayments={feePayments} feeConcessions={feeConcessions} onSaveFeeHeads={handleSaveFeeHeads} onSaveClassFees={handleSaveClassFees} onSaveFeePayments={handleSaveFeePayments} onSaveFeeConcessions={handleSaveFeeConcessions} />;
-            case 'daybook': return <DayBookManager students={students} classes={classes} feePayments={feePayments} openingBalances={openingBalances} expenditures={expenditures} onSaveOpeningBalances={handleSaveOpeningBalances} onSaveExpenditures={handleSaveExpenditures} />;
+            case 'accounts': return <AccountManager accounts={accounts} accountCategories={accountCategories} onSaveAccounts={handleSaveAccounts} onSaveAccountCategories={handleSaveAccountCategories} />;
+            case 'daybook': return <DayBookManager accounts={accounts} accountCategories={accountCategories} incomeEntries={incomeEntries} openingBalances={openingBalances} expenditures={expenditures} onSaveOpeningBalances={handleSaveOpeningBalances} onSaveExpenditures={handleSaveExpenditures} onSaveIncomeEntries={handleSaveIncomeEntries} />;
             case 'users': return <p>Access denied.</p>; // Should not be reachable for admins
             default: return <DashboardHome stats={stats} />;
         }
@@ -2020,6 +2362,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
         { id: 'holidays', label: 'Holidays', adminOnly: true },
         { id: 'workableSundays', label: 'Workable Sundays', adminOnly: true },
         { id: 'fees', label: 'Fee Management', adminOnly: true },
+        { id: 'accounts', label: 'Accounts', adminOnly: true },
         { id: 'daybook', label: 'Day Book', adminOnly: true },
         { id: 'backup', label: 'Backup & Restore', adminOnly: true },
     ];
