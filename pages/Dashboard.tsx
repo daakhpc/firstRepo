@@ -12,6 +12,9 @@ import {
     PlusIcon, EditIcon, TrashIcon, UploadIcon, LogoutIcon, MenuIcon, CloseIcon, RupeeIcon, CheckIcon, DownloadIcon, BookOpenIcon
 } from '../components/common';
 
+// Let TypeScript know about the global XLSX object from the script tag
+declare var XLSX: any;
+
 // Helper to generate unique IDs
 const generateId = () => `_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -29,6 +32,40 @@ const getRandomTimeInRange = (start: string, end: string): string => {
 
 const formatCurrency = (amount: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount);
 
+// --- Date Helper ---
+/**
+ * Formats an ISO date string (YYYY-MM-DD) into DD/MM/YYYY format.
+ * @param isoDate The date string in YYYY-MM-DD format.
+ * @returns The date string in DD/MM/YYYY format, or an empty string if input is invalid.
+ */
+const formatDate = (isoDate: string): string => {
+    if (!isoDate || typeof isoDate !== 'string') return '';
+    try {
+        const [year, month, day] = isoDate.split('-');
+        if (!year || !month || !day) return isoDate; // Return original if not in expected format
+        return `${day}/${month}/${year}`;
+    } catch {
+        return isoDate; // Fallback for any errors
+    }
+};
+
+/**
+ * Parses a DD/MM/YYYY date string into YYYY-MM-DD format.
+ * @param ddmmyyyy The date string in DD/MM/YYYY format.
+ * @returns The date string in YYYY-MM-DD format, or an empty string if input is invalid.
+ */
+const parseDateFromDDMMYYYY = (ddmmyyyy: string): string => {
+    if (!ddmmyyyy || typeof ddmmyyyy !== 'string') return '';
+    try {
+        const parts = ddmmyyyy.split('/');
+        if (parts.length !== 3) return '';
+        const [day, month, year] = parts;
+        if (day.length !== 2 || month.length !== 2 || year.length !== 4) return '';
+        return `${year}-${month}-${day}`;
+    } catch {
+        return '';
+    }
+};
 
 // --- Sub-Components for Different Views ---
 
@@ -303,7 +340,7 @@ const HolidayManager: React.FC<{ holidays: Holiday[]; onSave: (holidays: Holiday
                     <li key={h.id} className="flex flex-col sm:flex-row justify-between sm:items-center p-3 bg-gray-100 dark:bg-gray-700 rounded-md gap-2">
                         <div>
                             <span className="font-medium">{h.name}</span>
-                            <span className="text-sm text-gray-500 ml-0 sm:ml-2">({new Date(h.date + 'T00:00:00').toLocaleDateString()})</span>
+                            <span className="text-sm text-gray-500 ml-0 sm:ml-2">({formatDate(h.date)})</span>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                             <Button variant="secondary" size="sm" onClick={() => openModal(h)}><EditIcon /></Button>
@@ -928,7 +965,7 @@ const WorkableSundayManager: React.FC<{ workableSundays: WorkableSunday[]; onSav
             <ul className="space-y-2">
                 {workableSundays.map(ws => (
                     <li key={ws.id} className="flex flex-col sm:flex-row justify-between sm:items-center p-3 bg-gray-100 dark:bg-gray-700 rounded-md gap-2">
-                        <span className="font-medium">{new Date(ws.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                        <span className="font-medium">{formatDate(ws.date)}</span>
                         <div className="flex-shrink-0">
                            <Button variant="danger" size="sm" onClick={() => handleDelete(ws.id)}><TrashIcon /></Button>
                         </div>
@@ -1587,7 +1624,7 @@ const FeeManager: React.FC<{
                                             const headName = classFee ? feeHeads.find(h => h.id === classFee.feeHeadId)?.name : 'N/A';
                                             return (
                                             <tr key={p.id} className="border-b dark:border-gray-700">
-                                                <td className="p-2">{new Date(p.paymentDate + 'T00:00:00').toLocaleDateString()}</td>
+                                                <td className="p-2">{formatDate(p.paymentDate)}</td>
                                                 <td className="p-2">{headName}</td>
                                                 <td className="p-2">{formatCurrency(p.amountPaid)}</td>
                                                 <td className="p-2">{p.remarks}</td>
@@ -1652,7 +1689,7 @@ const AccountViewModal: React.FC<{
                     <tbody>
                         {allTransactions.map((tx, index) => (
                             <tr key={index} className="border-b dark:border-gray-700">
-                                <td className="p-2">{new Date(tx.date + 'T00:00:00').toLocaleDateString()}</td>
+                                <td className="p-2">{formatDate(tx.date)}</td>
                                 <td className="p-2">
                                     <span className={`px-2 py-1 text-xs font-semibold rounded-full ${tx.type === 'income' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                         {tx.type === 'income' ? 'Income' : 'Expense'}
@@ -1901,14 +1938,19 @@ const DayBookManager: React.FC<{
     onSaveOpeningBalances: (balances: OpeningBalance[]) => Promise<void>;
     onSaveExpenditures: (expenditures: Expenditure[]) => Promise<void>;
     onSaveIncomeEntries: (entries: IncomeEntry[]) => Promise<void>;
+    onSaveAccounts: (accounts: Account[]) => Promise<void>;
+    onSaveAccountCategories: (categories: AccountCategory[]) => Promise<void>;
+    onShowToast: (message: string, type: 'success' | 'error') => void;
 }> = ({ 
     accounts, accountCategories, incomeEntries, openingBalances, expenditures, 
     feePayments, students, classes,
-    onSaveOpeningBalances, onSaveExpenditures, onSaveIncomeEntries 
+    onSaveOpeningBalances, onSaveExpenditures, onSaveIncomeEntries, onSaveAccounts, onSaveAccountCategories,
+    onShowToast
 }) => {
     
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [isSaving, setIsSaving] = useState(false);
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     const [effectiveOpeningBalance, setEffectiveOpeningBalance] = useState<{amount: number, type: 'credit'|'debit'}>({ amount: 0, type: 'credit'});
 
@@ -2130,13 +2172,129 @@ const DayBookManager: React.FC<{
     
     const userCreatedAccounts = useMemo(() => accounts.filter(a => !a.isStudentAccount).sort((a,b) => a.name.localeCompare(b.name)), [accounts]);
     
+    const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const data = new Uint8Array(e.target?.result as ArrayBuffer);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                const json: any[] = XLSX.utils.sheet_to_json(worksheet);
+
+                if (json.length === 0) {
+                    onShowToast("The uploaded file is empty.", "error");
+                    return;
+                }
+
+                const requiredHeaders = ["Account Name", "Date", "Debit", "Credit", "Narration"];
+                const headers = Object.keys(json[0]);
+                const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+                if (missingHeaders.length > 0) {
+                    onShowToast(`File is missing required headers: ${missingHeaders.join(', ')}`, "error");
+                    return;
+                }
+                
+                let tempAccounts = [...accounts];
+                let tempCategories = [...accountCategories];
+                let tempExpenditures = [...expenditures];
+                let tempIncomes = [...incomeEntries];
+                
+                let importedCategory = tempCategories.find(c => c.name === "Imported from Excel");
+                if (!importedCategory) {
+                    importedCategory = { id: generateId(), name: "Imported from Excel", isSystem: false };
+                    tempCategories.push(importedCategory);
+                    await onSaveAccountCategories(tempCategories);
+                }
+
+                let newAccountsCreated = 0;
+                let transactionsImported = 0;
+
+                for (const row of json) {
+                    const accountName = row["Account Name"]?.trim();
+                    const dateStr = row["Date"];
+                    const debit = parseFloat(row["Debit"] || 0);
+                    const credit = parseFloat(row["Credit"] || 0);
+                    const narration = row["Narration"] || "";
+
+                    if (!accountName || !dateStr || (debit === 0 && credit === 0)) continue;
+
+                    const isoDate = parseDateFromDDMMYYYY(dateStr);
+                    if (!isoDate) {
+                        console.warn(`Skipping row due to invalid date format: ${dateStr}`);
+                        continue;
+                    }
+
+                    let account = tempAccounts.find(a => a.name.toLowerCase() === accountName.toLowerCase());
+                    if (!account) {
+                        account = {
+                            id: generateId(),
+                            name: accountName,
+                            categoryId: importedCategory.id,
+                            isStudentAccount: false
+                        };
+                        tempAccounts.push(account);
+                        newAccountsCreated++;
+                    }
+
+                    if (debit > 0) {
+                        const newExpense: Expenditure = {
+                            id: generateId(),
+                            date: isoDate,
+                            accountId: account.id,
+                            amount: debit,
+                            remarks: narration
+                        };
+                        tempExpenditures.push(newExpense);
+                        transactionsImported++;
+                    } else if (credit > 0) {
+                        const newIncome: IncomeEntry = {
+                            id: generateId(),
+                            date: isoDate,
+                            accountId: account.id,
+                            amount: credit,
+                            remarks: narration
+                        };
+                        tempIncomes.push(newIncome);
+                        transactionsImported++;
+                    }
+                }
+                
+                // Batch save all changes
+                if(newAccountsCreated > 0) await onSaveAccounts(tempAccounts);
+                if(transactionsImported > 0) {
+                    await onSaveExpenditures(tempExpenditures);
+                    await onSaveIncomeEntries(tempIncomes);
+                }
+
+                onShowToast(`Import successful! Added ${transactionsImported} transactions and ${newAccountsCreated} new accounts.`, 'success');
+
+            } catch (err) {
+                console.error("Error processing Excel file:", err);
+                onShowToast("Failed to process the file. Please check its format.", "error");
+            } finally {
+                if (fileInputRef.current) fileInputRef.current.value = "";
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
+
     return (
         <Card>
             <div className="flex flex-col md:flex-row justify-between md:items-center mb-6 gap-4">
                 <h2 className="text-2xl font-bold">Day Book</h2>
-                <div className="w-full md:w-auto">
-                    <label className="block text-sm font-medium mb-1">Select Date</label>
-                    <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-full"/>
+                <div className="flex items-center gap-4">
+                    <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
+                        <UploadIcon className="w-5 h-5" /> Upload Day Book
+                    </Button>
+                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx, .xls" className="hidden" />
+                    <div className="w-full md:w-auto">
+                        <label className="block text-sm font-medium mb-1">Select Date</label>
+                        <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-full"/>
+                    </div>
                 </div>
             </div>
 
@@ -2248,7 +2406,7 @@ const DayBookManager: React.FC<{
                 </div>
             </div>
 
-            <Modal isOpen={isOpeningBalanceModalOpen} onClose={() => setIsOpeningBalanceModalOpen(false)} title={`Set Opening Balance for ${new Date(selectedDate+'T00:00:00').toLocaleDateString()}`}>
+            <Modal isOpen={isOpeningBalanceModalOpen} onClose={() => setIsOpeningBalanceModalOpen(false)} title={`Set Opening Balance for ${formatDate(selectedDate)}`}>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Set a manual opening balance for this date. This will override the automatic calculation from the previous day's closing balance. Set amount to 0 to remove manual override.</p>
                 <div className="space-y-4">
                      <div>
@@ -2599,7 +2757,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
             }
             case 'fees': return <FeeManager classes={classes} students={students} feeHeads={feeHeads} classFees={classFees} feePayments={feePayments} feeConcessions={feeConcessions} onSaveFeeHeads={handleSaveFeeHeads} onSaveClassFees={handleSaveClassFees} onSaveFeePayments={handleSaveFeePayments} onSaveFeeConcessions={handleSaveFeeConcessions} />;
             case 'accounts': return <AccountManager accounts={accounts} accountCategories={accountCategories} incomeEntries={incomeEntries} expenditures={expenditures} feePayments={feePayments} onSaveAccounts={handleSaveAccounts} onSaveAccountCategories={handleSaveAccountCategories} />;
-            case 'daybook': return <DayBookManager accounts={accounts} accountCategories={accountCategories} incomeEntries={incomeEntries} openingBalances={openingBalances} expenditures={expenditures} feePayments={feePayments} students={students} classes={classes} onSaveOpeningBalances={handleSaveOpeningBalances} onSaveExpenditures={handleSaveExpenditures} onSaveIncomeEntries={handleSaveIncomeEntries} />;
+            case 'daybook': return <DayBookManager accounts={accounts} accountCategories={accountCategories} incomeEntries={incomeEntries} openingBalances={openingBalances} expenditures={expenditures} feePayments={feePayments} students={students} classes={classes} onSaveOpeningBalances={handleSaveOpeningBalances} onSaveExpenditures={handleSaveExpenditures} onSaveIncomeEntries={handleSaveIncomeEntries} onSaveAccounts={handleSaveAccounts} onSaveAccountCategories={handleSaveAccountCategories} onShowToast={showToast} />;
             case 'users': return <p>Access denied.</p>; // Should not be reachable for admins
             default: return <DashboardHome stats={stats} />;
         }
