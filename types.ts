@@ -85,6 +85,8 @@ export interface AccountCategory {
 export interface Account {
   id: string;
   name: string;
+  fatherName?: string;
+  mobile?: string;
   categoryId: string;
   isStudentAccount?: boolean;
   studentId?: string;
@@ -94,8 +96,8 @@ export interface IncomeEntry {
     id: string;
     date: string; // YYYY-MM-DD
     accountId: string;
-    description: string;
     amount: number;
+    remarks?: string;
 }
 
 export interface OpeningBalance {
@@ -107,9 +109,9 @@ export interface OpeningBalance {
 export interface Expenditure {
     id: string;
     date: string; // YYYY-MM-DD
-    description: string;
-    amount: number;
     accountId: string;
+    amount: number;
+    remarks?: string;
 }
 
 

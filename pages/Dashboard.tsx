@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
     CollegeInfo, ClassInfo, Student, Holiday, ViewType, AttendanceData, 
@@ -1691,7 +1692,7 @@ const AccountManager: React.FC<{
         return accountCategories.map(cat => ({
             ...cat,
             accounts: accounts.filter(acc => acc.categoryId === cat.id)
-        })).filter(g => g.accounts.length > 0);
+        })).sort((a,b) => a.name.localeCompare(b.name));
     }, [accounts, accountCategories]);
 
     return (
@@ -1713,7 +1714,7 @@ const AccountManager: React.FC<{
                              <div key={group.id}>
                                 <h4 className="font-bold text-lg mb-2 p-2 bg-gray-100 dark:bg-gray-700/50 rounded-md">{group.name}</h4>
                                 <ul className="space-y-2 pl-4">
-                                    {group.accounts.map(acc => (
+                                    {group.accounts.sort((a,b) => a.name.localeCompare(b.name)).map(acc => (
                                         <li key={acc.id} className="flex justify-between items-center p-2 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                             <div className="font-medium">
                                                 {acc.name}
@@ -1741,7 +1742,7 @@ const AccountManager: React.FC<{
                         <Button onClick={() => openCategoryModal()}><PlusIcon /> Add Category</Button>
                     </div>
                     <ul className="space-y-2">
-                        {accountCategories.map(cat => (
+                        {accountCategories.sort((a,b) => a.name.localeCompare(b.name)).map(cat => (
                              <li key={cat.id} className="flex justify-between items-center p-3 bg-gray-100 dark:bg-gray-700 rounded-md">
                                 <span className="font-medium">{cat.name} {cat.isSystem && <span className="text-xs ml-2 text-gray-500">(System - Class)</span>}</span>
                                 {!cat.isSystem && (
@@ -1766,6 +1767,14 @@ const AccountManager: React.FC<{
                         <label className="block text-sm font-medium mb-1">Account Name</label>
                         <Input placeholder="e.g., Office Supplies" value={currentAccount?.name || ''} onChange={e => setCurrentAccount({...currentAccount, name: e.target.value})} />
                     </div>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Father's Name (Optional)</label>
+                        <Input value={currentAccount?.fatherName || ''} onChange={e => setCurrentAccount({...currentAccount, fatherName: e.target.value})} />
+                    </div>
+                     <div>
+                        <label className="block text-sm font-medium mb-1">Mobile (Optional)</label>
+                        <Input value={currentAccount?.mobile || ''} onChange={e => setCurrentAccount({...currentAccount, mobile: e.target.value})} />
+                    </div>
                      <div>
                         <label className="block text-sm font-medium mb-1">Category</label>
                         <Select value={currentAccount?.categoryId || ''} onChange={e => setCurrentAccount({...currentAccount, categoryId: e.target.value})}>
@@ -1788,13 +1797,22 @@ const DayBookManager: React.FC<{
     incomeEntries: IncomeEntry[];
     openingBalances: OpeningBalance[];
     expenditures: Expenditure[];
+    feePayments: FeePayment[];
+    students: Student[];
+    classes: ClassInfo[];
     onSaveOpeningBalances: (balances: OpeningBalance[]) => Promise<void>;
     onSaveExpenditures: (expenditures: Expenditure[]) => Promise<void>;
     onSaveIncomeEntries: (entries: IncomeEntry[]) => Promise<void>;
-}> = ({ accounts, accountCategories, incomeEntries, openingBalances, expenditures, onSaveOpeningBalances, onSaveExpenditures, onSaveIncomeEntries }) => {
+}> = ({ 
+    accounts, accountCategories, incomeEntries, openingBalances, expenditures, 
+    feePayments, students, classes,
+    onSaveOpeningBalances, onSaveExpenditures, onSaveIncomeEntries 
+}) => {
     
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [isSaving, setIsSaving] = useState(false);
+
+    const [effectiveOpeningBalance, setEffectiveOpeningBalance] = useState<{amount: number, type: 'credit'|'debit'}>({ amount: 0, type: 'credit'});
 
     // Modals state
     const [isOpeningBalanceModalOpen, setIsOpeningBalanceModalOpen] = useState(false);
@@ -1806,49 +1824,161 @@ const DayBookManager: React.FC<{
     const [isIncomeModalOpen, setIsIncomeModalOpen] = useState(false);
     const [currentIncome, setCurrentIncome] = useState<Partial<IncomeEntry> | null>(null);
 
+    // Memoized helpers to find entities by ID for performance
+    const studentsMap = useMemo(() => new Map(students.map(s => [s.id, s])), [students]);
+    const classesMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
+    const accountsMap = useMemo(() => new Map(accounts.map(a => [a.id, a])), [accounts]);
+    const categoriesMap = useMemo(() => new Map(accountCategories.map(c => [c.id, c])), [accountCategories]);
+
+    const calculateOpeningBalanceForDate = useCallback((dateStr: string): { amount: number; type: 'credit' | 'debit' } => {
+        const userDefinedBalance = openingBalances.find(ob => ob.id === dateStr);
+        if (userDefinedBalance) {
+            return userDefinedBalance;
+        }
+
+        const prevDate = new Date(dateStr + 'T00:00:00');
+        prevDate.setDate(prevDate.getDate() - 1);
+        const prevDateStr = prevDate.toISOString().split('T')[0];
+        
+        const allDates = [...new Set([
+            ...openingBalances.map(ob => ob.id),
+            ...feePayments.map(fp => fp.paymentDate),
+            ...incomeEntries.map(ie => ie.date),
+            ...expenditures.map(ex => ex.date)
+        ])].sort();
+
+        if (allDates.length === 0 || new Date(dateStr) < new Date(allDates[0])) {
+            return { amount: 0, type: 'credit' };
+        }
+
+        // It's expensive to recalculate the whole chain every time.
+        // So we get the PREVIOUS day's balance and calculate from there.
+        // This requires a recursive or iterative approach.
+        // To prevent deep recursion, we'll find the nearest preceding user-defined balance.
+        
+        const sortedBalances = [...openingBalances].sort((a,b) => new Date(b.id).getTime() - new Date(a.id).getTime());
+        const startingPoint = sortedBalances.find(ob => new Date(ob.id) < new Date(dateStr));
+        
+        let currentDate;
+        let runningBalance;
+
+        if (startingPoint) {
+            currentDate = new Date(startingPoint.id + 'T00:00:00');
+            runningBalance = startingPoint.type === 'credit' ? startingPoint.amount : -startingPoint.amount;
+        } else {
+             // If no starting point, start from beginning of all transactions
+            currentDate = new Date(allDates[0] + 'T00:00:00');
+            runningBalance = 0;
+        }
+
+        const targetDate = new Date(dateStr + 'T00:00:00');
+        
+        // Iterate from the starting point up to the day before the selected date
+        while (currentDate < targetDate) {
+            const loopDateStr = currentDate.toISOString().split('T')[0];
+            
+            const incomeForDay = feePayments.filter(p => p.paymentDate === loopDateStr).reduce((sum, p) => sum + p.amountPaid, 0)
+                               + incomeEntries.filter(i => i.date === loopDateStr).reduce((sum, i) => sum + i.amount, 0);
+            const expenditureForDay = expenditures.filter(e => e.date === loopDateStr).reduce((sum, e) => sum + e.amount, 0);
+            
+            runningBalance += (incomeForDay - expenditureForDay);
+            
+            // Move to next day
+            currentDate.setDate(currentDate.getDate() + 1);
+            
+            // If the next day has a user-defined balance, we reset our running total to that.
+            const nextDayStr = currentDate.toISOString().split('T')[0];
+            const nextDayUserBalance = openingBalances.find(ob => ob.id === nextDayStr);
+            if (nextDayUserBalance) {
+                runningBalance = nextDayUserBalance.type === 'credit' ? nextDayUserBalance.amount : -nextDayUserBalance.amount;
+            }
+        }
+        
+        return {
+            amount: Math.abs(runningBalance),
+            type: runningBalance >= 0 ? 'credit' : 'debit'
+        };
+
+    }, [openingBalances, feePayments, incomeEntries, expenditures]);
+    
+    useEffect(() => {
+        const ob = calculateOpeningBalanceForDate(selectedDate);
+        setEffectiveOpeningBalance(ob);
+    }, [selectedDate, calculateOpeningBalanceForDate]);
+
+
     // Filtered data for the view
-    const dailyIncome = useMemo(() => incomeEntries.filter(p => p.date === selectedDate), [incomeEntries, selectedDate]);
+    const dailyFeePayments = useMemo(() => feePayments.filter(p => p.paymentDate === selectedDate), [feePayments, selectedDate]);
+    const dailyOtherIncome = useMemo(() => incomeEntries.filter(p => p.date === selectedDate), [incomeEntries, selectedDate]);
     const dailyExpenditure = useMemo(() => expenditures.filter(e => e.date === selectedDate), [expenditures, selectedDate]);
-    const openingBalance = useMemo(() => openingBalances.find(ob => ob.id === selectedDate), [openingBalances, selectedDate]);
 
     // Totals
-    const totalIncome = dailyIncome.reduce((sum, p) => sum + p.amount, 0);
+    const totalIncome = dailyFeePayments.reduce((sum, p) => sum + p.amountPaid, 0) + dailyOtherIncome.reduce((sum, p) => sum + p.amount, 0);
     const totalExpenditure = dailyExpenditure.reduce((sum, e) => sum + e.amount, 0);
     
     // Calculate Closing Balance
-    const openingBalanceAmount = openingBalance ? (openingBalance.type === 'credit' ? openingBalance.amount : -openingBalance.amount) : 0;
+    const openingBalanceAmount = effectiveOpeningBalance ? (effectiveOpeningBalance.type === 'credit' ? effectiveOpeningBalance.amount : -effectiveOpeningBalance.amount) : 0;
     const closingBalance = openingBalanceAmount + totalIncome - totalExpenditure;
+
+    // --- Description Helpers ---
+    const getTransactionDescription = (type: 'fee' | 'income' | 'expenditure', item: any): { title: string, subtitle: string } => {
+        if (type === 'fee') {
+            const payment = item as FeePayment;
+            const student = studentsMap.get(payment.studentId);
+            if (!student) return { title: 'Fee from Unknown Student', subtitle: payment.remarks || '' };
+            const studentClass = classesMap.get(student.classId);
+            return {
+                title: `Payment from: ${student.name}`,
+                subtitle: `${student.fatherName} / ${student.studentId} / ${studentClass?.name || 'N/A'}`
+            };
+        }
+        
+        const account = accountsMap.get(item.accountId);
+        if (!account) return { title: 'Unknown Account', subtitle: item.remarks || '' };
+        
+        const category = categoriesMap.get(account.categoryId);
+        const prefix = type === 'expenditure' ? 'Payment to:' : 'Income from:';
+        
+        return {
+            title: `${prefix} ${account.name}`,
+            subtitle: `${account.fatherName || ''} / ${account.mobile || ''} / ${category?.name || 'N/A'}`.replace(/ \/ $|^\/ /g, '').replace('//', '/')
+        };
+    };
 
     // Opening Balance handlers
     const openOpeningBalanceModal = () => {
+        const userDefinedOB = openingBalances.find(ob => ob.id === selectedDate);
         setOpeningBalanceForm({
-            amount: openingBalance?.amount || 0,
-            type: openingBalance?.type || 'credit'
+            amount: userDefinedOB?.amount || 0,
+            type: userDefinedOB?.type || 'credit'
         });
         setIsOpeningBalanceModalOpen(true);
     };
 
     const handleSaveOpeningBalance = async () => {
         setIsSaving(true);
-        const newBalance: OpeningBalance = {
-            id: selectedDate,
-            amount: openingBalanceForm.amount,
-            type: openingBalanceForm.type
-        };
         const updatedBalances = openingBalances.filter(ob => ob.id !== selectedDate);
-        await onSaveOpeningBalances([...updatedBalances, newBalance]);
+        if(openingBalanceForm.amount > 0) {
+            const newBalance: OpeningBalance = {
+                id: selectedDate,
+                amount: openingBalanceForm.amount,
+                type: openingBalanceForm.type
+            };
+            updatedBalances.push(newBalance);
+        }
+        await onSaveOpeningBalances(updatedBalances);
         setIsSaving(false);
         setIsOpeningBalanceModalOpen(false);
     };
 
     // Income handlers
     const openIncomeModal = (entry: Partial<IncomeEntry> | null = null) => {
-        setCurrentIncome(entry || { id: '', date: selectedDate, description: '', amount: 0, accountId: '' });
+        setCurrentIncome(entry || { id: '', date: selectedDate, remarks: '', amount: 0, accountId: '' });
         setIsIncomeModalOpen(true);
     };
 
     const handleSaveIncome = async () => {
-        if (!currentIncome || !currentIncome.accountId || currentIncome.amount <= 0) {
+        if (!currentIncome || !currentIncome.accountId || !currentIncome.amount || currentIncome.amount <= 0) {
             alert('Please select an account and enter a valid amount.');
             return;
         }
@@ -1873,13 +2003,13 @@ const DayBookManager: React.FC<{
 
     // Expenditure handlers
     const openExpenditureModal = (exp: Partial<Expenditure> | null = null) => {
-        setCurrentExpenditure(exp || { id: '', date: selectedDate, description: '', amount: 0, accountId: '' });
+        setCurrentExpenditure(exp || { id: '', date: selectedDate, remarks: '', amount: 0, accountId: '' });
         setIsExpenditureModalOpen(true);
     };
 
     const handleSaveExpenditure = async () => {
-        if (!currentExpenditure || !currentExpenditure.description || !currentExpenditure.accountId || currentExpenditure.amount <= 0) {
-            alert('Please select an account, enter a description, and a valid amount.');
+        if (!currentExpenditure || !currentExpenditure.accountId || !currentExpenditure.amount || currentExpenditure.amount <= 0) {
+            alert('Please select an account and a valid amount.');
             return;
         }
         setIsSaving(true);
@@ -1900,8 +2030,8 @@ const DayBookManager: React.FC<{
         }
     };
     
-    const getAccountName = (accountId: string) => accounts.find(a => a.id === accountId)?.name || 'Unknown Account';
-
+    const userCreatedAccounts = useMemo(() => accounts.filter(a => !a.isStudentAccount), [accounts]);
+    
     return (
         <Card>
             <div className="flex flex-col md:flex-row justify-between md:items-center mb-6 gap-4">
@@ -1919,28 +2049,32 @@ const DayBookManager: React.FC<{
                     <div>
                          <div className="flex justify-between items-center mb-2">
                              <h3 className="text-lg font-semibold text-green-600">Income (Credit)</h3>
-                             <Button size="sm" onClick={() => openIncomeModal()}><PlusIcon className="w-4 h-4" /> Add Income</Button>
+                             <Button size="sm" onClick={() => openIncomeModal()}><PlusIcon className="w-4 h-4" /> Add Other Income</Button>
                         </div>
                         <Card>
-                            <div className="overflow-y-auto max-h-64 custom-scrollbar">
+                            <div className="overflow-y-auto max-h-[30rem] custom-scrollbar">
                                 <table className="w-full text-sm text-left">
                                     <tbody>
-                                        {dailyIncome.map(p => (
-                                            <tr key={p.id} className="border-b dark:border-gray-700">
-                                                <td className="p-2">
-                                                    <div>{getAccountName(p.accountId)}</div>
-                                                    <div className="text-xs text-gray-500">{p.description}</div>
-                                                </td>
-                                                <td className="p-2 text-right font-medium">{formatCurrency(p.amount)}</td>
-                                                <td className="p-2 text-right">
-                                                    <div className="flex gap-2 justify-end">
-                                                        <Button size="sm" variant="secondary" onClick={() => openIncomeModal(p)}><EditIcon className="w-4 h-4" /></Button>
-                                                        <Button size="sm" variant="danger" onClick={() => handleDeleteIncome(p.id)}><TrashIcon className="w-4 h-4" /></Button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                        {dailyIncome.length === 0 && <tr><td colSpan={3} className="p-4 text-center text-gray-500">No income recorded for this day.</td></tr>}
+                                        {dailyFeePayments.map(p => {
+                                            const { title, subtitle } = getTransactionDescription('fee', p);
+                                            return (
+                                                <tr key={p.id} className="border-b dark:border-gray-700">
+                                                    <td className="p-2"><div className="font-medium">{title}</div><div className="text-xs text-gray-500">{subtitle}</div></td>
+                                                    <td className="p-2 text-right font-medium">{formatCurrency(p.amountPaid)}</td>
+                                                </tr>
+                                            );
+                                        })}
+                                        {dailyOtherIncome.map(i => {
+                                            const { title, subtitle } = getTransactionDescription('income', i);
+                                            return (
+                                                <tr key={i.id} className="border-b dark:border-gray-700">
+                                                    <td className="p-2"><div className="font-medium">{title}</div><div className="text-xs text-gray-500">{subtitle}</div>{i.remarks && <div className="text-xs italic text-gray-400">"{i.remarks}"</div>}</td>
+                                                    <td className="p-2 text-right font-medium">{formatCurrency(i.amount)}</td>
+                                                    <td className="p-2 text-right"><div className="flex gap-2 justify-end"><Button size="sm" variant="secondary" onClick={() => openIncomeModal(i)}><EditIcon className="w-4 h-4" /></Button><Button size="sm" variant="danger" onClick={() => handleDeleteIncome(i.id)}><TrashIcon className="w-4 h-4" /></Button></div></td>
+                                                </tr>
+                                            );
+                                        })}
+                                        {dailyFeePayments.length === 0 && dailyOtherIncome.length === 0 && <tr><td colSpan={3} className="p-4 text-center text-gray-500">No income recorded for this day.</td></tr>}
                                     </tbody>
                                 </table>
                             </div>
@@ -1956,21 +2090,16 @@ const DayBookManager: React.FC<{
                              <div className="overflow-y-auto max-h-64 custom-scrollbar">
                                 <table className="w-full text-sm text-left">
                                     <tbody>
-                                    {dailyExpenditure.map(e => (
-                                        <tr key={e.id} className="border-b dark:border-gray-700">
-                                            <td className="p-2">
-                                                <div>{e.description}</div>
-                                                <div className="text-xs text-gray-500">{getAccountName(e.accountId)}</div>
-                                            </td>
-                                            <td className="p-2 text-right font-medium">{formatCurrency(e.amount)}</td>
-                                            <td className="p-2 text-right">
-                                                <div className="flex gap-2 justify-end">
-                                                    <Button size="sm" variant="secondary" onClick={() => openExpenditureModal(e)}><EditIcon className="w-4 h-4" /></Button>
-                                                    <Button size="sm" variant="danger" onClick={() => handleDeleteExpenditure(e.id)}><TrashIcon className="w-4 h-4" /></Button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {dailyExpenditure.map(e => {
+                                        const { title, subtitle } = getTransactionDescription('expenditure', e);
+                                        return (
+                                            <tr key={e.id} className="border-b dark:border-gray-700">
+                                                <td className="p-2"><div className="font-medium">{title}</div><div className="text-xs text-gray-500">{subtitle}</div>{e.remarks && <div className="text-xs italic text-gray-400">"{e.remarks}"</div>}</td>
+                                                <td className="p-2 text-right font-medium">{formatCurrency(e.amount)}</td>
+                                                <td className="p-2 text-right"><div className="flex gap-2 justify-end"><Button size="sm" variant="secondary" onClick={() => openExpenditureModal(e)}><EditIcon className="w-4 h-4" /></Button><Button size="sm" variant="danger" onClick={() => handleDeleteExpenditure(e.id)}><TrashIcon className="w-4 h-4" /></Button></div></td>
+                                            </tr>
+                                        )
+                                    })}
                                     {dailyExpenditure.length === 0 && <tr><td colSpan={3} className="p-4 text-center text-gray-500">No expenditure recorded for this day.</td></tr>}
                                     </tbody>
                                 </table>
@@ -1985,16 +2114,16 @@ const DayBookManager: React.FC<{
                         <div className="flex justify-between items-center mb-2">
                             <h3 className="text-lg font-semibold">Summary</h3>
                              <Button size="sm" variant="secondary" onClick={openOpeningBalanceModal}>
-                                {openingBalance ? 'Edit Opening Balance' : 'Set Opening Balance'}
+                                {openingBalances.find(ob=>ob.id === selectedDate) ? 'Edit Opening Balance' : 'Set Opening Balance'}
                             </Button>
                         </div>
                          <Card>
                             <dl className="space-y-3">
                                 <div className="flex justify-between items-center">
                                     <dt className="text-gray-500">Opening Balance</dt>
-                                    <dd className={`font-semibold ${openingBalance?.type === 'debit' ? 'text-red-500' : 'text-gray-800 dark:text-gray-200'}`}>
-                                        {formatCurrency(openingBalance?.amount || 0)} 
-                                        <span className="text-xs ml-1">({openingBalance?.type || 'N/A'})</span>
+                                    <dd className={`font-semibold ${effectiveOpeningBalance?.type === 'debit' ? 'text-red-500' : 'text-gray-800 dark:text-gray-200'}`}>
+                                        {formatCurrency(effectiveOpeningBalance?.amount || 0)} 
+                                        <span className="text-xs ml-1">({effectiveOpeningBalance?.type || 'N/A'})</span>
                                     </dd>
                                 </div>
                                 <div className="flex justify-between items-center">
@@ -2015,7 +2144,8 @@ const DayBookManager: React.FC<{
                 </div>
             </div>
 
-            <Modal isOpen={isOpeningBalanceModalOpen} onClose={() => setIsOpeningBalanceModalOpen(false)} title="Set Opening Balance">
+            <Modal isOpen={isOpeningBalanceModalOpen} onClose={() => setIsOpeningBalanceModalOpen(false)} title={`Set Opening Balance for ${new Date(selectedDate+'T00:00:00').toLocaleDateString()}`}>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Set a manual opening balance for this date. This will override the automatic calculation from the previous day's closing balance. Set amount to 0 to remove manual override.</p>
                 <div className="space-y-4">
                      <div>
                         <label className="block text-sm font-medium mb-1">Amount</label>
@@ -2034,15 +2164,15 @@ const DayBookManager: React.FC<{
              <Modal isOpen={isExpenditureModalOpen} onClose={() => setIsExpenditureModalOpen(false)} title={currentExpenditure?.id ? "Edit Expenditure" : "Add Expenditure"}>
                 <div className="space-y-4">
                      <div>
-                        <label className="block text-sm font-medium mb-1">Account</label>
+                        <label className="block text-sm font-medium mb-1">Paid To (Account)</label>
                         <Select value={currentExpenditure?.accountId || ''} onChange={e => setCurrentExpenditure({...currentExpenditure, accountId: e.target.value})}>
                             <option value="">-- Select Account --</option>
-                            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                            {userCreatedAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                         </Select>
                     </div>
                      <div>
-                        <label className="block text-sm font-medium mb-1">Description</label>
-                        <Input value={currentExpenditure?.description || ''} onChange={e => setCurrentExpenditure({...currentExpenditure, description: e.target.value})} />
+                        <label className="block text-sm font-medium mb-1">Remarks (Purpose of expense)</label>
+                        <Input value={currentExpenditure?.remarks || ''} onChange={e => setCurrentExpenditure({...currentExpenditure, remarks: e.target.value})} />
                     </div>
                     <div>
                         <label className="block text-sm font-medium mb-1">Amount</label>
@@ -2051,18 +2181,18 @@ const DayBookManager: React.FC<{
                     <Button onClick={handleSaveExpenditure} isLoading={isSaving}>Save</Button>
                 </div>
             </Modal>
-            <Modal isOpen={isIncomeModalOpen} onClose={() => setIsIncomeModalOpen(false)} title={currentIncome?.id ? "Edit Income Entry" : "Add Income Entry"}>
+            <Modal isOpen={isIncomeModalOpen} onClose={() => setIsIncomeModalOpen(false)} title={currentIncome?.id ? "Edit Income Entry" : "Add Other Income"}>
                 <div className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium mb-1">Account</label>
+                        <label className="block text-sm font-medium mb-1">Received From (Account)</label>
                         <Select value={currentIncome?.accountId || ''} onChange={e => setCurrentIncome({...currentIncome, accountId: e.target.value})}>
                             <option value="">-- Select Account --</option>
-                            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                            {userCreatedAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                         </Select>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium mb-1">Description</label>
-                        <Input placeholder="e.g., Received from..." value={currentIncome?.description || ''} onChange={e => setCurrentIncome({...currentIncome, description: e.target.value})} />
+                        <label className="block text-sm font-medium mb-1">Remarks</label>
+                        <Input placeholder="Optional notes" value={currentIncome?.remarks || ''} onChange={e => setCurrentIncome({...currentIncome, remarks: e.target.value})} />
                     </div>
                     <div>
                         <label className="block text-sm font-medium mb-1">Amount</label>
@@ -2194,11 +2324,23 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
         let finalAccounts = [...accounts];
         let finalCategories = [...accountCategories];
         let categoriesChanged = false;
+        let accountsChanged = false;
+
+        // Handle name changes for existing students
+        for (const student of updatedStudents) {
+            const original = originalStudents.find(s => s.id === student.id);
+            if (original && original.name !== student.name) {
+                const accountIndex = finalAccounts.findIndex(acc => acc.studentId === student.id);
+                if (accountIndex > -1) {
+                    finalAccounts[accountIndex] = { ...finalAccounts[accountIndex], name: student.name };
+                    accountsChanged = true;
+                }
+            }
+        }
 
         // Handle additions
         if (newStudents.length > 0) {
             const newAccounts: Account[] = [];
-            const newCategories: AccountCategory[] = [];
             
             for (const student of newStudents) {
                 const className = classes.find(c => c.id === student.classId)?.name;
@@ -2206,8 +2348,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
                     let category = finalCategories.find(c => c.name === className && c.isSystem);
                     if (!category) {
                         category = { id: generateId(), name: className, isSystem: true };
-                        newCategories.push(category);
-                        finalCategories.push(category); // Add to current list for subsequent lookups in the loop
+                        finalCategories.push(category); 
                         categoriesChanged = true;
                     }
                     newAccounts.push({
@@ -2221,24 +2362,29 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
             }
             if (newAccounts.length > 0) {
                 finalAccounts.push(...newAccounts);
+                accountsChanged = true;
             }
-            if (categoriesChanged) {
-                await handleSaveAccountCategories(finalCategories);
-            }
-            await handleSaveAccounts(finalAccounts);
         }
 
         // Handle deletions
         const deletedStudentIds = originalStudents.filter(s => !updatedStudents.some(us => us.id === s.id)).map(s => s.id);
         if (deletedStudentIds.length > 0) {
             finalAccounts = finalAccounts.filter(acc => !acc.isStudentAccount || !deletedStudentIds.includes(acc.studentId!));
-            await handleSaveAccounts(finalAccounts);
+            accountsChanged = true;
             // Delete payments & concessions of deleted students
             const updatedFeePayments = feePayments.filter(fp => !deletedStudentIds.includes(fp.studentId));
             await handleSaveFeePayments(updatedFeePayments);
             const updatedFeeConcessions = feeConcessions.filter(fc => !deletedStudentIds.includes(fc.studentId));
             await handleSaveFeeConcessions(updatedFeeConcessions);
         }
+
+        if (categoriesChanged) {
+            await handleSaveAccountCategories(finalCategories);
+        }
+        if (accountsChanged) {
+            await handleSaveAccounts(finalAccounts);
+        }
+
 
         await db.saveStudents(updatedStudents); setStudents(updatedStudents); showToast('Students updated!', 'success');
     };
@@ -2348,7 +2494,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
             }
             case 'fees': return <FeeManager classes={classes} students={students} feeHeads={feeHeads} classFees={classFees} feePayments={feePayments} feeConcessions={feeConcessions} onSaveFeeHeads={handleSaveFeeHeads} onSaveClassFees={handleSaveClassFees} onSaveFeePayments={handleSaveFeePayments} onSaveFeeConcessions={handleSaveFeeConcessions} />;
             case 'accounts': return <AccountManager accounts={accounts} accountCategories={accountCategories} onSaveAccounts={handleSaveAccounts} onSaveAccountCategories={handleSaveAccountCategories} />;
-            case 'daybook': return <DayBookManager accounts={accounts} accountCategories={accountCategories} incomeEntries={incomeEntries} openingBalances={openingBalances} expenditures={expenditures} onSaveOpeningBalances={handleSaveOpeningBalances} onSaveExpenditures={handleSaveExpenditures} onSaveIncomeEntries={handleSaveIncomeEntries} />;
+            case 'daybook': return <DayBookManager accounts={accounts} accountCategories={accountCategories} incomeEntries={incomeEntries} openingBalances={openingBalances} expenditures={expenditures} feePayments={feePayments} students={students} classes={classes} onSaveOpeningBalances={handleSaveOpeningBalances} onSaveExpenditures={handleSaveExpenditures} onSaveIncomeEntries={handleSaveIncomeEntries} />;
             case 'users': return <p>Access denied.</p>; // Should not be reachable for admins
             default: return <DashboardHome stats={stats} />;
         }
