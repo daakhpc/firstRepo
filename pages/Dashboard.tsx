@@ -60,8 +60,10 @@ const parseDateFromDDMMYYYY = (ddmmyyyy: string): string => {
         const parts = ddmmyyyy.split('/');
         if (parts.length !== 3) return '';
         const [day, month, year] = parts;
-        if (day.length !== 2 || month.length !== 2 || year.length !== 4) return '';
-        return `${year}-${month}-${day}`;
+        if (day.length > 2 || month.length > 2 || year.length !== 4) return '';
+        const paddedDay = day.padStart(2, '0');
+        const paddedMonth = month.padStart(2, '0');
+        return `${year}-${paddedMonth}-${paddedDay}`;
     } catch {
         return '';
     }
@@ -819,7 +821,7 @@ const AttendanceManager: React.FC<{
                                         <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg no-print">
                                             <h4 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Holidays in {month.monthName}</h4>
                                             <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 dark:text-gray-300">
-                                                {allMonthHolidays.map(h => <li key={h.id}><strong>{new Date(h.date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}:</strong> {h.name}</li>)}
+                                                {allMonthHolidays.map(h => <li key={h.id}><strong>{formatDate(h.date)}:</strong> {h.name}</li>)}
                                             </ul>
                                         </div>
                                     )}
@@ -2183,7 +2185,7 @@ const DayBookManager: React.FC<{
                 const workbook = XLSX.read(data, { type: 'array' });
                 const sheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[sheetName];
-                const json: any[] = XLSX.utils.sheet_to_json(worksheet);
+                const json: any[] = XLSX.utils.sheet_to_json(worksheet, { raw: false, dateNF: "dd/MM/yyyy" });
 
                 if (json.length === 0) {
                     onShowToast("The uploaded file is empty.", "error");
@@ -2192,7 +2194,7 @@ const DayBookManager: React.FC<{
 
                 const requiredHeaders = ["Account Name", "Date", "Debit", "Credit", "Narration"];
                 const headers = Object.keys(json[0]);
-                const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+                const missingHeaders = requiredHeaders.filter(h => !headers.some(header => header.trim() === h));
                 if (missingHeaders.length > 0) {
                     onShowToast(`File is missing required headers: ${missingHeaders.join(', ')}`, "error");
                     return;
@@ -2228,7 +2230,7 @@ const DayBookManager: React.FC<{
                         continue;
                     }
 
-                    let account = tempAccounts.find(a => a.name.toLowerCase() === accountName.toLowerCase());
+                    let account = tempAccounts.find(a => a.name.toLowerCase() === accountName.toLowerCase() && !a.isStudentAccount);
                     if (!account) {
                         account = {
                             id: generateId(),
@@ -2270,7 +2272,11 @@ const DayBookManager: React.FC<{
                     await onSaveIncomeEntries(tempIncomes);
                 }
 
-                onShowToast(`Import successful! Added ${transactionsImported} transactions and ${newAccountsCreated} new accounts.`, 'success');
+                if (transactionsImported > 0) {
+                    onShowToast(`Import successful! Added ${transactionsImported} transactions and ${newAccountsCreated} new accounts.`, 'success');
+                } else {
+                    onShowToast('No new transactions to import found in the file.', 'error');
+                }
 
             } catch (err) {
                 console.error("Error processing Excel file:", err);
