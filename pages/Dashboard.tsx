@@ -125,7 +125,7 @@ const ClassManager: React.FC<{
                 <Button onClick={() => openModal()}><PlusIcon className="w-5 h-5"/> Add Class</Button>
             </div>
             <ul className="space-y-2">
-                {classes.map(cls => (
+                {[...classes].sort((a, b) => a.name.localeCompare(b.name)).map(cls => (
                     <li key={cls.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 bg-gray-100 dark:bg-gray-700 rounded-md gap-2">
                         <span className="font-medium">{cls.name}</span>
                         <div className="flex items-center gap-2 flex-shrink-0">
@@ -213,7 +213,7 @@ const StudentManager: React.FC<{
     };
 
     const currentClassName = classes.find(c => c.id === classId)?.name || '...';
-    const classStudents = students.filter(s => s.classId === classId);
+    const classStudents = students.filter(s => s.classId === classId).sort((a,b) => a.name.localeCompare(b.name));
 
     return (
         <Card>
@@ -299,7 +299,7 @@ const HolidayManager: React.FC<{ holidays: Holiday[]; onSave: (holidays: Holiday
                 <Button onClick={() => openModal()}><PlusIcon /> Add Holiday</Button>
             </div>
             <ul className="space-y-2">
-                {holidays.map(h => (
+                {[...holidays].sort((a,b) => a.name.localeCompare(b.name)).map(h => (
                     <li key={h.id} className="flex flex-col sm:flex-row justify-between sm:items-center p-3 bg-gray-100 dark:bg-gray-700 rounded-md gap-2">
                         <div>
                             <span className="font-medium">{h.name}</span>
@@ -604,7 +604,7 @@ const AttendanceManager: React.FC<{
                     <label className="block text-sm font-medium mb-1">Class</label>
                     <Select value={selectedClassId} onChange={e => setSelectedClassId(e.target.value)}>
                         <option value="">Select a class</option>
-                        {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        {[...classes].sort((a,b) => a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </Select>
                 </div>
                 <div className="flex-grow w-full sm:w-auto">
@@ -1015,7 +1015,7 @@ const UserManager: React.FC<{ users: User[]; currentUser: User; onSave: (users: 
                         </tr>
                     </thead>
                     <tbody>
-                        {users.map(u => (
+                        {[...users].sort((a,b) => a.email.localeCompare(b.email)).map(u => (
                             <tr key={u.id} className="border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700">
                                 <td className="p-2">{u.email}</td>
                                 <td className="p-2 capitalize">{u.role}</td>
@@ -1387,7 +1387,7 @@ const FeeManager: React.FC<{
                         <Button onClick={() => openHeadModal()}><PlusIcon /> Add Head</Button>
                     </div>
                     <ul className="space-y-2">
-                        {feeHeads.map(h => (
+                        {[...feeHeads].sort((a,b) => a.name.localeCompare(b.name)).map(h => (
                             <li key={h.id} className="flex justify-between items-center p-3 bg-gray-100 dark:bg-gray-700 rounded-md">
                                 <span className="font-medium">{h.name}</span>
                                 <div className="flex gap-2">
@@ -1412,7 +1412,7 @@ const FeeManager: React.FC<{
                         <div className="w-full sm:w-64">
                             <Select value={selectedClassIdForAssign} onChange={e => setSelectedClassIdForAssign(e.target.value)}>
                                 <option value="">-- Select a Class --</option>
-                                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                {[...classes].sort((a,b) => a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </Select>
                         </div>
                     </div>
@@ -1447,7 +1447,7 @@ const FeeManager: React.FC<{
                                 <label className="block text-sm font-medium mb-1">Fee Head</label>
                                 <Select value={currentClassFee?.feeHeadId || ''} onChange={e => setCurrentClassFee({...currentClassFee, feeHeadId: e.target.value})}>
                                     <option value="">-- Select --</option>
-                                    {feeHeads.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+                                    {[...feeHeads].sort((a,b) => a.name.localeCompare(b.name)).map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
                                 </Select>
                             </div>
                              <div>
@@ -1468,16 +1468,16 @@ const FeeManager: React.FC<{
                          <div className="w-full sm:w-64">
                             <Select value={selectedClassIdForPayment} onChange={e => setSelectedClassIdForPayment(e.target.value)}>
                                 <option value="">-- Select a Class --</option>
-                                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                {[...classes].sort((a,b) => a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </Select>
                         </div>
                     </div>
                     {selectedClassIdForPayment && (
                         <div className="overflow-x-auto custom-scrollbar">
                             <table className="w-full text-left">
-                                <thead className="border-b dark:border-gray-600"><tr><th className="p-2">Name</th><th className="p-2">Student ID</th><th className="p-2">Total Due</th><th className="p-2">Total Paid</th><th className="p-2">Balance</th><th className="p-2">Actions</th></tr></thead>
+                                <thead className="border-b dark:border-gray-600"><tr><th className="p-2">Name</th><th className="p-2">Father's Name</th><th className="p-2">Total Due</th><th className="p-2">Total Paid</th><th className="p-2">Balance</th><th className="p-2">Actions</th></tr></thead>
                                 <tbody>
-                                    {students.filter(s => s.classId === selectedClassIdForPayment).map(s => {
+                                    {students.filter(s => s.classId === selectedClassIdForPayment).sort((a,b) => a.name.localeCompare(b.name)).map(s => {
                                         const applicableFees = classFees.filter(cf => cf.classId === s.classId);
                                         const totalFeeAmount = applicableFees.reduce((sum, cf) => sum + cf.amount, 0);
                                         const studentConcessions = feeConcessions.filter(fc => fc.studentId === s.id);
@@ -1498,7 +1498,7 @@ const FeeManager: React.FC<{
                                         return (
                                         <tr key={s.id} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                             <td className="p-2 font-medium">{s.name}</td>
-                                            <td className="p-2">{s.studentId}</td>
+                                            <td className="p-2">{s.fatherName}</td>
                                             <td className="p-2">{formatCurrency(totalDue)}</td>
                                             <td className="p-2">{formatCurrency(totalPaid)}</td>
                                             <td className={`p-2 font-semibold ${balanceColor}`}>{formatCurrency(balance)}</td>
@@ -1582,7 +1582,7 @@ const FeeManager: React.FC<{
                                 <table className="w-full text-left text-sm">
                                     <thead className="sticky top-0 bg-gray-100 dark:bg-gray-700"><tr><th className="p-2">Date</th><th className="p-2">Fee Head</th><th className="p-2">Amount Paid</th><th className="p-2">Remarks</th><th className="p-2"></th></tr></thead>
                                     <tbody>
-                                        {feePayments.filter(p => p.studentId === selectedStudent.id).map(p => {
+                                        {feePayments.filter(p => p.studentId === selectedStudent.id).sort((a,b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime()).map(p => {
                                             const classFee = classFees.find(cf => cf.id === p.classFeeId);
                                             const headName = classFee ? feeHeads.find(h => h.id === classFee.feeHeadId)?.name : 'N/A';
                                             return (
@@ -1607,12 +1607,85 @@ const FeeManager: React.FC<{
     );
 };
 
+const AccountViewModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    account: Account | null;
+    incomeEntries: IncomeEntry[];
+    expenditures: Expenditure[];
+    feePayments: FeePayment[];
+}> = ({ isOpen, onClose, account, incomeEntries, expenditures, feePayments }) => {
+    if (!isOpen || !account) return null;
+
+    let relatedIncome: { date: string, amount: number, remarks: string }[] = [];
+    if(account.isStudentAccount) {
+        relatedIncome = feePayments
+            .filter(fp => fp.studentId === account.studentId)
+            .map(fp => ({ date: fp.paymentDate, amount: fp.amountPaid, remarks: `Fee Payment ${fp.remarks ? ` - ${fp.remarks}` : ''}`}));
+    } else {
+        relatedIncome = incomeEntries
+            .filter(i => i.accountId === account.id)
+            .map(i => ({ date: i.date, amount: i.amount, remarks: i.remarks || '' }));
+    }
+    
+    const relatedExpenditure = expenditures
+        .filter(e => e.accountId === account.id)
+        .map(e => ({ date: e.date, amount: e.amount, remarks: e.remarks || '' }));
+
+    const allTransactions = [
+        ...relatedIncome.map(i => ({...i, type: 'income'})),
+        ...relatedExpenditure.map(e => ({...e, type: 'expenditure'}))
+    ].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title={`Transaction History for ${account.name}`} size="lg">
+             <div className="max-h-[60vh] overflow-y-auto custom-scrollbar">
+                <table className="w-full text-left text-sm">
+                    <thead className="sticky top-0 bg-gray-100 dark:bg-gray-700">
+                        <tr>
+                            <th className="p-2">Date</th>
+                            <th className="p-2">Type</th>
+                            <th className="p-2">Remarks</th>
+                            <th className="p-2 text-right">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {allTransactions.map((tx, index) => (
+                            <tr key={index} className="border-b dark:border-gray-700">
+                                <td className="p-2">{new Date(tx.date + 'T00:00:00').toLocaleDateString()}</td>
+                                <td className="p-2">
+                                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${tx.type === 'income' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                        {tx.type === 'income' ? 'Income' : 'Expense'}
+                                    </span>
+                                </td>
+                                <td className="p-2">{tx.remarks}</td>
+                                <td className={`p-2 text-right font-medium ${tx.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                                    {formatCurrency(tx.amount)}
+                                </td>
+                            </tr>
+                        ))}
+                         {allTransactions.length === 0 && (
+                            <tr>
+                                <td colSpan={4} className="text-center p-4 text-gray-500">No transactions found for this account.</td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+             </div>
+        </Modal>
+    );
+};
+
+
 const AccountManager: React.FC<{
     accounts: Account[];
     accountCategories: AccountCategory[];
+    incomeEntries: IncomeEntry[];
+    expenditures: Expenditure[];
+    feePayments: FeePayment[];
     onSaveAccounts: (data: Account[]) => Promise<void>;
     onSaveAccountCategories: (data: AccountCategory[]) => Promise<void>;
-}> = ({ accounts, accountCategories, onSaveAccounts, onSaveAccountCategories }) => {
+}> = ({ accounts, accountCategories, incomeEntries, expenditures, feePayments, onSaveAccounts, onSaveAccountCategories }) => {
     
     type AccountManagerTab = 'accounts' | 'categories';
     const [activeTab, setActiveTab] = useState<AccountManagerTab>('accounts');
@@ -1625,6 +1698,10 @@ const AccountManager: React.FC<{
     // Account Modal
     const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
     const [currentAccount, setCurrentAccount] = useState<Partial<Account> | null>(null);
+
+    // View Modal
+    const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+    const [viewedAccount, setViewedAccount] = useState<Account | null>(null);
 
     const TabButton: React.FC<{tabId: AccountManagerTab, children: React.ReactNode}> = ({ tabId, children }) => (
         <button
@@ -1667,6 +1744,11 @@ const AccountManager: React.FC<{
         setCurrentAccount(acc || { id: '', name: '', categoryId: '' });
         setIsAccountModalOpen(true);
     };
+    
+    const openViewModal = (acc: Account) => {
+        setViewedAccount(acc);
+        setIsViewModalOpen(true);
+    }
 
     const handleSaveAccount = async () => {
         if (!currentAccount?.name || !currentAccount.categoryId) {
@@ -1716,16 +1798,23 @@ const AccountManager: React.FC<{
                                 <ul className="space-y-2 pl-4">
                                     {group.accounts.sort((a,b) => a.name.localeCompare(b.name)).map(acc => (
                                         <li key={acc.id} className="flex justify-between items-center p-2 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                                            <div className="font-medium">
-                                                {acc.name}
-                                                {acc.isStudentAccount && <span className="text-xs ml-2 text-gray-500">(Student)</span>}
-                                            </div>
-                                            {!acc.isStudentAccount && (
-                                                <div className="flex gap-2">
-                                                    <Button variant="secondary" size="sm" onClick={() => openAccountModal(acc)}><EditIcon/></Button>
-                                                    <Button variant="danger" size="sm" onClick={() => handleDeleteAccount(acc.id)}><TrashIcon/></Button>
+                                            <div>
+                                                <div className="font-medium">{acc.name}</div>
+                                                <div className="text-sm text-gray-500">
+                                                    {acc.fatherName && <span>S/O {acc.fatherName}</span>}
+                                                    {acc.isStudentAccount && <span className="text-xs ml-2 text-blue-500 font-semibold">(Student)</span>}
                                                 </div>
-                                            )}
+                                            </div>
+                                            
+                                            <div className="flex gap-2">
+                                                <Button variant="secondary" size="sm" onClick={() => openViewModal(acc)}>View</Button>
+                                                {!acc.isStudentAccount && (
+                                                    <>
+                                                        <Button variant="secondary" size="sm" onClick={() => openAccountModal(acc)}><EditIcon/></Button>
+                                                        <Button variant="danger" size="sm" onClick={() => handleDeleteAccount(acc.id)}><TrashIcon/></Button>
+                                                    </>
+                                                )}
+                                            </div>
                                         </li>
                                     ))}
                                 </ul>
@@ -1742,7 +1831,7 @@ const AccountManager: React.FC<{
                         <Button onClick={() => openCategoryModal()}><PlusIcon /> Add Category</Button>
                     </div>
                     <ul className="space-y-2">
-                        {accountCategories.sort((a,b) => a.name.localeCompare(b.name)).map(cat => (
+                        {[...accountCategories].sort((a,b) => a.name.localeCompare(b.name)).map(cat => (
                              <li key={cat.id} className="flex justify-between items-center p-3 bg-gray-100 dark:bg-gray-700 rounded-md">
                                 <span className="font-medium">{cat.name} {cat.isSystem && <span className="text-xs ml-2 text-gray-500">(System - Class)</span>}</span>
                                 {!cat.isSystem && (
@@ -1756,6 +1845,15 @@ const AccountManager: React.FC<{
                     </ul>
                 </div>
             )}
+
+            <AccountViewModal 
+                isOpen={isViewModalOpen}
+                onClose={() => setIsViewModalOpen(false)}
+                account={viewedAccount}
+                incomeEntries={incomeEntries}
+                expenditures={expenditures}
+                feePayments={feePayments}
+            />
 
              <Modal isOpen={isCategoryModalOpen} onClose={() => setIsCategoryModalOpen(false)} title={currentCategory?.id ? 'Edit Category' : 'Add Category'}>
                 <Input placeholder="Category Name" value={currentCategory?.name || ''} onChange={e => setCurrentCategory({...currentCategory, name: e.target.value})} />
@@ -1779,7 +1877,7 @@ const AccountManager: React.FC<{
                         <label className="block text-sm font-medium mb-1">Category</label>
                         <Select value={currentAccount?.categoryId || ''} onChange={e => setCurrentAccount({...currentAccount, categoryId: e.target.value})}>
                             <option value="">-- Select Category --</option>
-                            {accountCategories.filter(c => !c.isSystem).map(c => (
+                            {accountCategories.filter(c => !c.isSystem).sort((a,b) => a.name.localeCompare(b.name)).map(c => (
                                 <option key={c.id} value={c.id}>{c.name}</option>
                             ))}
                         </Select>
@@ -2030,7 +2128,7 @@ const DayBookManager: React.FC<{
         }
     };
     
-    const userCreatedAccounts = useMemo(() => accounts.filter(a => !a.isStudentAccount), [accounts]);
+    const userCreatedAccounts = useMemo(() => accounts.filter(a => !a.isStudentAccount).sort((a,b) => a.name.localeCompare(b.name)), [accounts]);
     
     return (
         <Card>
@@ -2078,6 +2176,9 @@ const DayBookManager: React.FC<{
                                     </tbody>
                                 </table>
                             </div>
+                            <div className="text-right font-bold p-2 mt-2 border-t dark:border-gray-600">
+                                Total Income: <span className="text-green-600">{formatCurrency(totalIncome)}</span>
+                            </div>
                         </Card>
                     </div>
                      {/* Expenditure */}
@@ -2103,6 +2204,9 @@ const DayBookManager: React.FC<{
                                     {dailyExpenditure.length === 0 && <tr><td colSpan={3} className="p-4 text-center text-gray-500">No expenditure recorded for this day.</td></tr>}
                                     </tbody>
                                 </table>
+                             </div>
+                             <div className="text-right font-bold p-2 mt-2 border-t dark:border-gray-600">
+                                Total Expenditure: <span className="text-red-600">{formatCurrency(totalExpenditure)}</span>
                              </div>
                         </Card>
                     </div>
@@ -2354,6 +2458,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
                     newAccounts.push({
                         id: generateId(),
                         name: student.name,
+                        fatherName: student.fatherName,
                         categoryId: category.id,
                         isStudentAccount: true,
                         studentId: student.id,
@@ -2493,7 +2598,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUser, onLogout }) => {
                 return <BackupRestoreManager allData={allData} onRestore={handleRestoreData} />;
             }
             case 'fees': return <FeeManager classes={classes} students={students} feeHeads={feeHeads} classFees={classFees} feePayments={feePayments} feeConcessions={feeConcessions} onSaveFeeHeads={handleSaveFeeHeads} onSaveClassFees={handleSaveClassFees} onSaveFeePayments={handleSaveFeePayments} onSaveFeeConcessions={handleSaveFeeConcessions} />;
-            case 'accounts': return <AccountManager accounts={accounts} accountCategories={accountCategories} onSaveAccounts={handleSaveAccounts} onSaveAccountCategories={handleSaveAccountCategories} />;
+            case 'accounts': return <AccountManager accounts={accounts} accountCategories={accountCategories} incomeEntries={incomeEntries} expenditures={expenditures} feePayments={feePayments} onSaveAccounts={handleSaveAccounts} onSaveAccountCategories={handleSaveAccountCategories} />;
             case 'daybook': return <DayBookManager accounts={accounts} accountCategories={accountCategories} incomeEntries={incomeEntries} openingBalances={openingBalances} expenditures={expenditures} feePayments={feePayments} students={students} classes={classes} onSaveOpeningBalances={handleSaveOpeningBalances} onSaveExpenditures={handleSaveExpenditures} onSaveIncomeEntries={handleSaveIncomeEntries} />;
             case 'users': return <p>Access denied.</p>; // Should not be reachable for admins
             default: return <DashboardHome stats={stats} />;
